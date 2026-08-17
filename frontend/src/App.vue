@@ -172,10 +172,10 @@
             </div>
             <div class="toggle-buttons">
               <button class="toggle-btn" :class="{ active: !useFullModel }" @click="toggleModel('simple')">简化公式</button>
-              <button class="toggle-btn full-btn" :class="{ active: useFullModel }" @click="toggleModel('full')">GAT+GBDT</button>
+              <button class="toggle-btn full-btn" :class="{ active: useFullModel }" @click="toggleModel('full')">{{ fullModelButtonLabel }}</button>
             </div>
             <div class="model-hint">
-              <span v-if="useFullModel">完整模型：使用图神经网络和梯度提升树进行预测；失败时自动回退</span>
+              <span v-if="useFullModel">{{ fullModelHint }}</span>
               <span v-else>简化公式：基于真实太阳能数据快速估算</span>
             </div>
           </div>
@@ -189,7 +189,7 @@
           <div class="loading-content" v-if="isLoading">
             <div class="loading-spinner"></div>
             <p>正在从 NASA POWER 获取点击位置气候数据...</p>
-            <p>正在运行 GAT+GBDT 模型计算 PVPI...</p>
+            <p>{{ loadingModelText }}</p>
             <p class="loading-hint">首次请求可能需要 30-90 秒，请耐心等待</p>
           </div>
 
@@ -201,7 +201,7 @@
 
           <div class="result-content" v-else-if="realtimeResult">
             <div class="result-hero" :style="{ '--score-color': realtimeResult.level_color }">
-              <div class="score-ring"><b>{{ realtimeResult.pvpi.toFixed(2) }}</b><small>PVPI</small></div>
+              <div class="score-ring"><b>{{ Number(realtimeResult.pvpi).toFixed(2) }}</b><small>PVPI</small></div>
               <div class="result-hero-meta">
                 <div class="level-badge" :style="{ background: realtimeResult.level_color }">{{ realtimeResult.level }}</div>
                 <div class="suitability-text"><span>适配度</span><strong :style="{ color: realtimeResult.level_color }">{{ realtimeResult.suitability }}</strong></div>
@@ -209,8 +209,8 @@
             </div>
 
             <div class="compact-data-grid">
-              <div class="data-card"><span class="data-label">经度</span><strong>{{ realtimeResult.lon.toFixed(4) }}°</strong></div>
-              <div class="data-card"><span class="data-label">纬度</span><strong>{{ realtimeResult.lat.toFixed(4) }}°</strong></div>
+              <div class="data-card"><span class="data-label">经度</span><strong>{{ Number(realtimeResult.lon).toFixed(4) }}°</strong></div>
+              <div class="data-card"><span class="data-label">纬度</span><strong>{{ Number(realtimeResult.lat).toFixed(4) }}°</strong></div>
               <div class="data-card"><span class="data-label">年均太阳辐射</span><strong>{{ realtimeResult.solar_data.ghi_annual_mean }} kWh/m2</strong></div>
               <div class="data-card"><span class="data-label">辐射标准差</span><strong>{{ realtimeResult.solar_data.ghi_annual_std }} kWh/m2</strong></div>
               <div class="data-card"><span class="data-label">年均温度</span><strong>{{ realtimeResult.solar_data.temp_annual_mean }} °C</strong></div>
@@ -248,7 +248,22 @@ const errorMessage = ref("");
 const lastClickLatLng = ref(null);
 const mouseCoords = ref(null);
 const useFullModel = ref(false);
+const torchAvailable = ref(false);
 const modelStatusText = ref("简化公式");
+
+const fullModelButtonLabel = computed(() => (torchAvailable.value ? "GAT+GBDT" : "GBDT模型"));
+const fullModelHint = computed(() =>
+  torchAvailable.value
+    ? "完整模型：使用图神经网络和梯度提升树进行预测"
+    : "完整模型：当前环境未启用 torch，使用已训练的 GBDT 运行包推理"
+);
+const loadingModelText = computed(() =>
+  useFullModel.value
+    ? torchAvailable.value
+      ? "正在运行 GAT+GBDT 模型计算 PVPI..."
+      : "正在运行 GBDT 模型计算 PVPI..."
+    : "正在运行简化公式计算 PVPI..."
+);
 
 const provinceNames = {
   anhui: "安徽",
@@ -1088,11 +1103,14 @@ const toggleModel = async (mode) => {
     const result = await response.json();
     if (result.success) {
       useFullModel.value = mode === "full";
-      modelStatusText.value = result.model_type || modelLabel(useFullModel.value);
+      if (typeof result.torch_available === "boolean") {
+        torchAvailable.value = result.torch_available;
+      }
+      modelStatusText.value = result.model_type || modelLabel(useFullModel.value, torchAvailable.value);
     }
   } catch (error) {
     useFullModel.value = mode === "full";
-    modelStatusText.value = modelLabel(useFullModel.value);
+    modelStatusText.value = modelLabel(useFullModel.value, torchAvailable.value);
   }
   if (lastClickLatLng.value) {
     fetchPrediction(lastClickLatLng.value.lat, lastClickLatLng.value.lon);
@@ -1104,10 +1122,12 @@ const checkModelStatus = async () => {
     const response = await fetchFromApi("/api/status");
     const result = await response.json();
     const modelLoaded = Boolean(result.model_loaded);
+    torchAvailable.value = Boolean(result.torch_available);
     useFullModel.value = modelLoaded;
-    modelStatusText.value = result.model_type || modelLabel(modelLoaded, result.torch_available);
+    modelStatusText.value = result.model_type || modelLabel(modelLoaded, torchAvailable.value);
   } catch (error) {
     useFullModel.value = false;
+    torchAvailable.value = false;
     modelStatusText.value = "简化公式";
   }
 };

@@ -420,6 +420,7 @@ def toggle_mode():
         "success": True,
         "mode": "full" if use_full_model else "simple",
         "model_type": _model_type_label(),
+        "torch_available": TORCH_AVAILABLE,
         "message": f'已切换到 {_model_type_label()}',
     })
 
