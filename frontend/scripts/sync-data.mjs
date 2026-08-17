@@ -2,11 +2,11 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const dashboardDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const projectRoot = path.resolve(dashboardDir, "..");
-const dataDir = path.join(dashboardDir, "public", "data");
+const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = path.resolve(frontendDir, "..");
+const dataDir = path.join(frontendDir, "public", "data");
 
-const stationCsv = path.join(projectRoot, "solar_data_output", "pv_stations_mcdm_scored.csv");
+const stationCsv = path.join(projectRoot, "backend", "data", "solar", "pv_stations_mcdm_scored.csv");
 const stationTarget = path.join(dataDir, "pv_stations_mcdm_scored.csv");
 const statsTarget = path.join(dataDir, "provincial_statistics.csv");
 
@@ -69,5 +69,5 @@ const statsText = [
 await copyFile(stationCsv, stationTarget);
 await writeFile(statsTarget, statsText, "utf8");
 
-console.log(`synced ${path.relative(projectRoot, stationCsv)} -> ${path.relative(dashboardDir, stationTarget)}`);
-console.log(`generated ${path.relative(dashboardDir, statsTarget)} from real station data`);
+console.log(`synced ${path.relative(projectRoot, stationCsv)} -> ${path.relative(frontendDir, stationTarget)}`);
+console.log(`generated ${path.relative(frontendDir, statsTarget)} from real station data`);

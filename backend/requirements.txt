@@ -1,0 +1,23 @@
+# API 运行时依赖（与 pyproject.toml 对齐；推荐用 uv）
+#   cd backend && uv sync && uv run python main.py
+#
+# 完整/旧版可选依赖见下方注释；torch 体积大，默认不装。
+
+flask>=3.0
+flask-cors>=4.0
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+scikit-learn>=1.3.0,<1.8
+lightgbm>=4.0
+xgboost>=2.0
+requests>=2.31.0
+
+# --- 离线脚本可选 ---
+# geopandas>=0.14.0
+# shapely>=2.0.0
+# tqdm>=4.66.0
+
+# --- GAT 推理可选（uv sync --group torch）---
+# torch>=2.0.0
+# torch-geometric>=2.4.0

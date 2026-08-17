@@ -62,17 +62,25 @@ class SolarRadiationAPI:
             ghi_values = [v for v in ghi_values if v != -999]
             temp_values = [v for v in temp_values if v != -999]
             precip_values = [v for v in precip_values if v != -999]
-            
+
+            if not ghi_values or not temp_values or not precip_values:
+                print(f"API返回无效气候序列 ({lat}, {lon})")
+                return None
+
             # 计算年份数
             num_years = end_year - start_year + 1
-            
-            return {
-                'ghi_annual_mean': np.mean(ghi_values),  # kWh/m²/day
-                'ghi_annual_std': np.std(ghi_values),
-                'temp_annual_mean': np.mean(temp_values),  # °C
-                'temp_annual_std': np.std(temp_values),
-                'precip_annual_mean': np.sum(precip_values) / num_years,  # mm/year (年均值)
+
+            result = {
+                'ghi_annual_mean': float(np.mean(ghi_values)),  # kWh/m²/day
+                'ghi_annual_std': float(np.std(ghi_values)),
+                'temp_annual_mean': float(np.mean(temp_values)),  # °C
+                'temp_annual_std': float(np.std(temp_values)),
+                'precip_annual_mean': float(np.sum(precip_values) / num_years),  # mm/year
             }
+            if not all(np.isfinite(v) for v in result.values()):
+                print(f"API统计结果含 NaN/Inf ({lat}, {lon})")
+                return None
+            return result
             
         except Exception as e:
             print(f"API请求失败 ({lat}, {lon}): {e}")

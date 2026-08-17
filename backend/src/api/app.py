@@ -1,4 +1,3 @@
-from pathlib import Path
 import time
 
 import numpy as np
@@ -6,15 +5,14 @@ import pandas as pd
 from flask import Flask, jsonify, request
 from scipy.spatial import cKDTree
 
-from utils_solar_data import SolarRadiationAPI
+from src.lib.paths import DATA_SOLAR, FRONTEND_DIST_DATA, FRONTEND_PUBLIC_DATA
+from src.lib.solar_data import SolarRadiationAPI
 
 try:
     from flask_cors import CORS
 except ImportError:
     def CORS(app):
         return app
-
-PROJECT_ROOT = Path(__file__).resolve().parent
 
 app = Flask(__name__)
 CORS(app)
@@ -23,27 +21,59 @@ station_data = None
 station_tree = None
 
 
+def parse_lat_lon(args):
+    """Parse and validate lat/lon from query args. Raises ValueError on bad input."""
+    if args.get("lat") is None or args.get("lon") is None:
+        raise ValueError("缺少参数 lat 或 lon")
+    try:
+        lat = float(args.get("lat"))
+        lon = float(args.get("lon"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("lat/lon 必须为数字") from exc
+    if not (np.isfinite(lat) and np.isfinite(lon)):
+        raise ValueError("lat/lon 不能为 NaN/Inf")
+    if not (-90.0 <= lat <= 90.0):
+        raise ValueError("lat 必须在 [-90, 90] 范围内")
+    if not (-180.0 <= lon <= 180.0):
+        raise ValueError("lon 必须在 [-180, 180] 范围内")
+    return lat, lon
+
+
+def _require_finite_solar(solar_data):
+    required = (
+        "ghi_annual_mean",
+        "ghi_annual_std",
+        "temp_annual_mean",
+        "temp_annual_std",
+        "precip_annual_mean",
+    )
+    for key in required:
+        value = float(solar_data[key])
+        if not np.isfinite(value):
+            raise ValueError(f"气候数据无效: {key}={value}")
+    return solar_data
+
+
 def load_station_data():
     global station_data, station_tree
     if station_data is not None:
         return station_data, station_tree
 
-    # 尝试多个可能的数据文件路径
     possible_paths = [
-        PROJECT_ROOT / "solar_data_output" / "pv_stations_mcdm_scored.csv",
-        PROJECT_ROOT / "dashboard" / "public" / "data" / "pv_stations_mcdm_scored.csv",
-        PROJECT_ROOT / "dashboard" / "dist" / "data" / "pv_stations_mcdm_scored.csv",
+        DATA_SOLAR / "pv_stations_mcdm_scored.csv",
+        FRONTEND_PUBLIC_DATA / "pv_stations_mcdm_scored.csv",
+        FRONTEND_DIST_DATA / "pv_stations_mcdm_scored.csv",
     ]
-    
+
     data_path = None
     for path in possible_paths:
         if path.exists():
             data_path = path
             break
-    
+
     if data_path is None:
         raise FileNotFoundError(f"无法找到光伏电站数据文件。已搜索路径: {possible_paths}")
-    
+
     station_data = pd.read_csv(data_path)
     station_tree = cKDTree(station_data[["lon", "lat"]].to_numpy())
     return station_data, station_tree
@@ -95,6 +125,7 @@ def classify_pvpi(pvpi):
 
 
 def predict_simple_value(solar_data):
+    _require_finite_solar(solar_data)
     ghi = round(float(solar_data["ghi_annual_mean"]), 2)
     temp = round(float(solar_data["temp_annual_mean"]), 2)
     temp_std = round(float(solar_data["temp_annual_std"]), 2)
@@ -104,7 +135,10 @@ def predict_simple_value(solar_data):
     temp_score = min(max((25 - abs(temp - 15)) / 25, 0), 1)
     precip_score = min(max((1000 - precip) / 1000, 0), 1)
     stability_score = min(max((10 - temp_std) / 10, 0), 1)
-    return max(0.1, min(0.95, round(0.3 * ghi_score + 0.2 * temp_score + 0.25 * precip_score + 0.25 * stability_score, 4)))
+    score = 0.3 * ghi_score + 0.2 * temp_score + 0.25 * precip_score + 0.25 * stability_score
+    if not np.isfinite(score):
+        raise ValueError("简化公式计算结果无效")
+    return max(0.1, min(0.95, round(float(score), 4)))
 
 
 def predict_simple(lat, lon):
@@ -134,8 +168,7 @@ def predict_simple(lat, lon):
 @app.route("/api/predict", methods=["GET"])
 def predict():
     try:
-        lat = float(request.args.get("lat"))
-        lon = float(request.args.get("lon"))
+        lat, lon = parse_lat_lon(request.args)
         solar_data = get_real_solar_data(lat, lon)
         pvpi = predict_simple_value(solar_data)
         level, level_color, suitability = classify_pvpi(pvpi)
@@ -158,6 +191,8 @@ def predict():
                 "source": solar_data.get("source", "unknown"),
             },
         })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -178,4 +213,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=True)

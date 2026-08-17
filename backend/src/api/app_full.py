@@ -1,4 +1,3 @@
-from pathlib import Path
 import pickle
 
 import numpy as np
@@ -6,7 +5,8 @@ import pandas as pd
 from flask import Flask, jsonify, request
 from scipy.spatial import cKDTree
 
-from api_server import classify_pvpi, get_nasa_solar_data, predict_simple_value
+from src.api.app import classify_pvpi, get_nasa_solar_data, parse_lat_lon, predict_simple_value
+from src.lib.paths import GAT_GBDT_MODEL, GBDT_RUNTIME_MODEL
 
 try:
     from flask_cors import CORS
@@ -22,8 +22,6 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
-
-PROJECT_ROOT = Path(__file__).resolve().parent
 
 app = Flask(__name__)
 CORS(app)
@@ -87,8 +85,14 @@ MODEL_LEVEL_SUITABILITY = {
 
 def load_full_model():
     global model_package, gat_model, use_full_model
-    model_path = PROJECT_ROOT / "models" / "models" / "model_gat_gbdt_pvssi.pkl"
-    if not model_path.exists():
+    # 无 torch 时优先加载已导出的 GBDT 运行包，避免 pickle 依赖 torch
+    if TORCH_AVAILABLE:
+        candidates = [GAT_GBDT_MODEL, GBDT_RUNTIME_MODEL]
+    else:
+        candidates = [GBDT_RUNTIME_MODEL, GAT_GBDT_MODEL]
+
+    model_path = next((p for p in candidates if p.exists()), None)
+    if model_path is None:
         return False
 
     try:
@@ -109,6 +113,8 @@ def load_full_model():
             use_full_model = True
         elif "gbdt_models" in model_package:
             use_full_model = True
+            if not TORCH_AVAILABLE:
+                print(f"[INFO] 已加载 GBDT 运行包（无 torch）: {model_path.name}")
         return use_full_model
     except Exception as e:
         print(f"[ERROR] 模型加载失败: {e}")
@@ -203,6 +209,14 @@ def _build_spatial_features(lat, lon, solar_data, model_package):
 INFERENCE_VERSION = "v3-nasa-gat-reg"
 
 
+def _model_type_label():
+    if not use_full_model or model_package is None:
+        return "简化公式"
+    if gat_model is not None:
+        return "GAT+GBDT集成模型"
+    return "GBDT模型"
+
+
 def _pvssi_to_pvpi(pvssi_value):
     pvssi_clipped = float(np.clip(pvssi_value, 0.0, 100.0))
     return max(0.1, min(0.99, pvssi_clipped / 100.0))
@@ -251,9 +265,12 @@ def predict_simple(lat, lon):
 
 def _full_prediction(lat, lon):
     if model_package is None:
-        raise RuntimeError("完整模型未加载")
+        raise RuntimeError("完整模型未加载，请确认 backend/models/model_gbdt_runtime.pkl 存在")
 
     solar_data = get_nasa_solar_data(lat, lon)
+    for key in ("ghi_annual_mean", "ghi_annual_std", "temp_annual_mean", "temp_annual_std", "precip_annual_mean"):
+        if not np.isfinite(float(solar_data[key])):
+            raise ValueError(f"气候数据无效: {key}")
     spatial = _build_spatial_features(lat, lon, solar_data, model_package)
     feature_values = spatial["feature_values"]
     X_cand = np.array([feature_values], dtype=np.float32)
@@ -297,6 +314,8 @@ def _full_prediction(lat, lon):
             gat_probs = F.softmax(cls_out[new_idx], dim=0).cpu().numpy()
 
     pvpi = _pvssi_to_pvpi(pvssi_model)
+    if not np.isfinite(pvpi):
+        raise ValueError("模型输出无效（NaN/Inf）")
     level, level_color, suitability = classify_pvpi(pvpi)
 
     result = {
@@ -308,7 +327,7 @@ def _full_prediction(lat, lon):
         "level": level,
         "level_color": level_color,
         "suitability": suitability,
-        "model_type": "GAT+GBDT集成模型",
+        "model_type": _model_type_label(),
         "inference_version": INFERENCE_VERSION,
         "pvpi_source": pvpi_source,
         "gbdt_pred": round(gbdt_pred_mean, 4),
@@ -334,11 +353,14 @@ def predict_full(lat, lon):
 @app.route("/api/predict", methods=["GET"])
 def predict():
     try:
-        lat = float(request.args.get("lat"))
-        lon = float(request.args.get("lon"))
+        lat, lon = parse_lat_lon(request.args)
         mode = request.args.get("mode", "simple")
+        if mode == "full" and model_package is None:
+            return jsonify({"error": "完整模型未加载"}), 503
         result = predict_full(lat, lon) if mode == "full" else predict_simple(lat, lon)
         return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -349,7 +371,8 @@ def status():
     y_max = float(model_package["train_df_minimal"]["PVSSI_rule"].max()) if model_package else None
     return jsonify({
         "model_loaded": model_package is not None,
-        "model_type": "GAT+GBDT集成模型" if use_full_model else "简化公式",
+        "model_type": _model_type_label(),
+        "torch_available": TORCH_AVAILABLE,
         "inference_version": INFERENCE_VERSION,
         "feature_cols": model_package["feature_cols"] if model_package else None,
         "levels": model_package["id_to_level"] if model_package else None,
@@ -362,8 +385,10 @@ def status():
 @app.route("/api/debug_model", methods=["GET"])
 def debug_model():
     try:
-        lat = float(request.args.get("lat", 31.23))
-        lon = float(request.args.get("lon", 121.47))
+        lat, lon = parse_lat_lon({
+            "lat": request.args.get("lat", 31.23),
+            "lon": request.args.get("lon", 121.47),
+        })
         result = _full_prediction(lat, lon)
         return jsonify({
             "input_lat": lat,
@@ -376,15 +401,17 @@ def debug_model():
             "gat_probs": result.get("gat_probs"),
             "solar_data": result.get("solar_data"),
         })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/toggle_mode", methods=["POST"])
 def toggle_mode():
     global use_full_model
-    mode = (request.get_json() or {}).get("mode", "simple")
+    payload = request.get_json(silent=True) or {}
+    mode = payload.get("mode", "simple")
     if mode == "full":
         use_full_model = model_package is not None or load_full_model()
     else:
@@ -392,7 +419,8 @@ def toggle_mode():
     return jsonify({
         "success": True,
         "mode": "full" if use_full_model else "simple",
-        "message": f'已切换到 {("完整模型" if use_full_model else "简化公式")}',
+        "model_type": _model_type_label(),
+        "message": f'已切换到 {_model_type_label()}',
     })
 
 
@@ -402,4 +430,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=5000, debug=False)

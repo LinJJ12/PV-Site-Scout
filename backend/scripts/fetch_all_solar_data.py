@@ -3,6 +3,8 @@
 支持断点续传、进度保存、错误处理
 """
 
+import _bootstrap  # noqa: F401
+
 import geopandas as gpd
 import pandas as pd
 import numpy as np
@@ -10,7 +12,8 @@ from pathlib import Path
 import pickle
 import time
 from datetime import datetime
-from utils_solar_data import SolarRadiationAPI
+from src.lib.solar_data import SolarRadiationAPI
+from src.lib.paths import DATA_CPVPD, DATA_SOLAR
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -341,8 +344,8 @@ def main():
     """)
     
     # 配置
-    data_dir = "CPVPD-2024_4326"
-    output_dir = "solar_data_output"
+    data_dir = DATA_CPVPD
+    output_dir = DATA_SOLAR
     
     # 创建获取器
     fetcher = SolarDataFetcher(data_dir, output_dir)

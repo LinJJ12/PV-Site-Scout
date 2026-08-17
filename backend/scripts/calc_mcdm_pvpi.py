@@ -1,6 +1,10 @@
+import _bootstrap  # noqa: F401
+
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
+
+from src.lib.paths import DATA_SOLAR
 
 def calculate_pvpi(data_path, output_path):
     print("1. 加载光伏电站气象和地理数据...")
@@ -76,8 +80,8 @@ def calculate_pvpi(data_path, output_path):
     return w_ahp, w_ewm, w_combined, df
 
 if __name__ == "__main__":
-    input_csv = "solar_data_output/pv_stations_solar_data.csv"
-    output_csv = "solar_data_output/pv_stations_mcdm_scored.csv"
+    input_csv = DATA_SOLAR / "pv_stations_solar_data.csv"
+    output_csv = DATA_SOLAR / "pv_stations_mcdm_scored.csv"
     
     w_ahp, w_ewm, w_combined, df_scored = calculate_pvpi(input_csv, output_csv)
     

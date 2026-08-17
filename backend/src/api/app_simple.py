@@ -1,10 +1,6 @@
-from pathlib import Path
-
-import pandas as pd
 from flask import Flask, jsonify, request
-from scipy.spatial import cKDTree
 
-from api_server import classify_pvpi, get_real_solar_data, predict_simple_value
+from src.api.app import classify_pvpi, get_real_solar_data, parse_lat_lon, predict_simple_value
 
 try:
     from flask_cors import CORS
@@ -14,14 +10,12 @@ except ImportError:
 
 app = Flask(__name__)
 CORS(app)
-PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 @app.route("/api/predict", methods=["GET"])
 def predict():
     try:
-        lat = float(request.args.get("lat"))
-        lon = float(request.args.get("lon"))
+        lat, lon = parse_lat_lon(request.args)
         solar_data = get_real_solar_data(lat, lon)
         pvpi = predict_simple_value(solar_data)
         level, level_color, suitability = classify_pvpi(pvpi)
@@ -44,6 +38,8 @@ def predict():
                 "source": solar_data.get("source", "unknown"),
             },
         })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -64,4 +60,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=True)

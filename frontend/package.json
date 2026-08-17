@@ -1,0 +1,25 @@
+{
+  "name": "pv-site-selection-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync:data": "node scripts/sync-data.mjs",
+    "predev": "npm run sync:data",
+    "dev": "vite",
+    "prebuild": "npm run sync:data",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "echarts": "^5.6.0",
+    "gsap": "^3.15.0",
+    "three": "^0.184.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.0.7"
+  }
+}

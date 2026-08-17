@@ -987,13 +987,25 @@ const handleResize = () => {
   visibleCharts.value.forEach((chart) => chart.resize());
 };
 
-const API_BASES = ["http://127.0.0.1:5000", "http://localhost:5000"];
+const API_BASES = [
+  typeof window !== "undefined" ? window.location.origin : "",
+  "http://127.0.0.1:5000",
+  "http://localhost:5000"
+].filter(Boolean);
+
+const modelLabel = (loaded, torchAvailable = false) => {
+  if (!loaded) return "简化公式";
+  return torchAvailable ? "GAT+GBDT集成模型" : "GBDT模型";
+};
 
 const fetchFromApi = async (path, options = {}) => {
   let lastError = null;
   for (const base of API_BASES) {
     try {
-      const response = await fetch(`${base}${path}`, options);
+      const response = await fetch(`${base}${path}`, {
+        ...options,
+        signal: options.signal || AbortSignal.timeout(15000)
+      });
       if (!response.ok) {
         throw new Error(`接口响应异常：${response.status}`);
       }
@@ -1036,10 +1048,10 @@ const fetchPrediction = async (lat, lon) => {
             throw new Error("未获取到 NASA 气候数据，请检查网络后重试");
           }
           if (result.inference_version !== "v3-nasa-gat-reg") {
-            throw new Error("后端推理版本过旧，请重启 api_server_full.py 后重试");
+            throw new Error("后端推理版本过旧，请重启 backend（uv run python main.py）后重试");
           }
           if (Number(result.pvpi) >= 0.999) {
-            throw new Error("PVPI 结果异常（恒为 1.00），请确认已重启最新版 api_server_full.py");
+            throw new Error("PVPI 结果异常（恒为 1.00），请确认已启动最新版 backend");
           }
         }
         realtimeResult.value = result;
@@ -1051,7 +1063,7 @@ const fetchPrediction = async (lat, lon) => {
     }
 
     if (useFullModel.value) {
-      throw lastError || new Error("GAT+GBDT 后端不可用，请确认已启动 api_server_full.py");
+      throw lastError || new Error("完整模型后端不可用，请确认已启动：cd backend && uv run python main.py");
     }
 
     const fallback = buildLocalPrediction(lat, lon, lastError?.message || "后端服务不可用");
@@ -1076,11 +1088,11 @@ const toggleModel = async (mode) => {
     const result = await response.json();
     if (result.success) {
       useFullModel.value = mode === "full";
-      modelStatusText.value = useFullModel.value ? "GAT+GBDT集成模型" : "简化公式";
+      modelStatusText.value = result.model_type || modelLabel(useFullModel.value);
     }
   } catch (error) {
     useFullModel.value = mode === "full";
-    modelStatusText.value = useFullModel.value ? "GAT+GBDT集成模型" : "简化公式";
+    modelStatusText.value = modelLabel(useFullModel.value);
   }
   if (lastClickLatLng.value) {
     fetchPrediction(lastClickLatLng.value.lat, lastClickLatLng.value.lon);
@@ -1093,7 +1105,7 @@ const checkModelStatus = async () => {
     const result = await response.json();
     const modelLoaded = Boolean(result.model_loaded);
     useFullModel.value = modelLoaded;
-    modelStatusText.value = modelLoaded ? "GAT+GBDT集成模型" : "简化公式";
+    modelStatusText.value = result.model_type || modelLabel(modelLoaded, result.torch_available);
   } catch (error) {
     useFullModel.value = false;
     modelStatusText.value = "简化公式";

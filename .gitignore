@@ -10,8 +10,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Python packaging build leftovers (root only)
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -20,14 +21,17 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Virtual Environment / package managers
 venv/
 env/
 ENV/
-.venv
+.venv/
+backend/.venv/
+.uv/
+uv.cache/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Jupyter
+.ipynb_checkpoints/
 *.ipynb
 
 # IDE
@@ -38,9 +42,9 @@ ENV/
 *~
 
 # Node.js / Frontend
-dashboard/node_modules/
-dashboard/dist/
-dashboard/.DS_Store
+frontend/node_modules/
+frontend/dist/
+frontend/.DS_Store
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -49,22 +53,84 @@ vite-dev.log
 vite-dev.err
 vite-dev.err.log
 
-# Data files (large files)
-CPVPD-2024_4326/
-solar_data_output/
+# ---------- 大文件 / 运行时数据（开源仓默认不收录） ----------
+# 后端原始与处理数据、模型权重、日志
+backend/data/
+backend/resource/
+backend/models/
+
+# 机器学习与序列化产物
 *.pkl
+*.joblib
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.bin
+
+# 地理空间大数据
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.sbn
+*.sbx
+*.shp.xml
+*.gpkg
+*.tif
+*.tiff
+*.img
+*.nc
+*.hdf
+
+# 表格 / 缓存数据（体积大）
+*.csv
+*.parquet
+*.feather
+*.arrow
+*.xlsx
+*.xls
 *.db
 *.sqlite
 *.sqlite3
-*.csv
-*.json
-!dashboard/public/data/
-!dashboard/dist/data/
 
-# Models (large files)
-models/
-!models/*.md
+# 压缩包与备份
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+*.bz2
+*.xz
+*.bak
+*.backup
+
+# 媒体与大体量静态资源
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.psd
+*.pdf
+
+# JSON 默认忽略（避免误提交大体量 geojson）；白名单见下
+*.json
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/public/data/
+!frontend/public/data/**
+
+# 允许前端演示所需的轻量静态数据；排除其中的大体量站点表
+frontend/public/data/pv_stations_mcdm_scored.csv
+frontend/dist/data/pv_stations_mcdm_scored.csv
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini

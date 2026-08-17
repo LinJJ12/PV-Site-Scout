@@ -1,184 +1,199 @@
-# 光伏电站智能选址数据可视化大屏
+# 光伏电站智能选址可视化系统
 
-一个基于3D地图和机器学习的光伏电站选址决策支持系统，提供直观的数据可视化和智能分析功能。
+基于 3D 地图与机器学习的光伏电站选址决策支持演示项目，提供全国电站分布可视化、资源/收益分析，以及基于气象数据的实时选址潜力预测。
 
-演示视频地址为：【全国光伏电站智能选址可视化系统】 https://www.bilibili.com/video/BV1jojG66Eio/?share_source=copy_web&vd_source=f486789e701626cf145934c007761661
-<img width="2872" height="1700" alt="d5b3c9aa90b3f35346101a47c2c30fbe" src="https://github.com/user-attachments/assets/4f0ef94b-d5fe-4f29-878f-21e9295dc0b4" />
-<img width="2852" height="1704" alt="f6fae13994ccee096945c7857d8ad499" src="https://github.com/user-attachments/assets/a85c079e-bb38-4deb-846e-f569516cad83" />
-<img width="2866" height="1668" alt="fba45bb9284bab117fe7c1f77bd38943" src="https://github.com/user-attachments/assets/02a177ea-4497-44e2-a54f-55a6a5dd7f83" />
-<img width="2816" height="1638" alt="e762f4906e5e56c96d684bcb97323177" src="https://github.com/user-attachments/assets/602655c0-cad0-4ea1-a19a-2265072fa528" />
-<img width="2834" height="1640" alt="3df0d59b02dcd4df05043b2afc627ce8" src="https://github.com/user-attachments/assets/40c0941f-3dc2-43a6-8355-e63a3862eeb1" />
+> **开源声明**：本项目面向学习与科研交流开源，**仅供学习、研究与非商业演示**，不构成任何工程选址、投资或决策建议。完整许可见 [LICENSE](./LICENSE)。
 
+## 演示
 
+- 视频：[全国光伏电站智能选址可视化系统（Bilibili）](https://www.bilibili.com/video/BV1jojG66Eio/?share_source=copy_web&vd_source=f486789e701626cf145934c007761661)
 
+<p align="center">
+  <img width="48%" alt="演示截图1" src="https://github.com/user-attachments/assets/4f0ef94b-d5fe-4f29-878f-21e9295dc0b4" />
+  <img width="48%" alt="演示截图2" src="https://github.com/user-attachments/assets/a85c079e-bb38-4deb-846e-f569516cad83" />
+</p>
+<p align="center">
+  <img width="48%" alt="演示截图3" src="https://github.com/user-attachments/assets/02a177ea-4497-44e2-a54f-55a6a5dd7f83" />
+  <img width="48%" alt="演示截图4" src="https://github.com/user-attachments/assets/602655c0-cad0-4ea1-a19a-2265072fa528" />
+</p>
 
-## 🌟 功能特色
+## 功能概览
 
-### 核心功能
-- **选址态势**：3D交互式中国地图，展示全国光伏电站分布
-- **资源收益评估**：多维度分析光伏资源潜力和经济效益
-- **实时选址**：基于AI模型的实时选址推荐
+| 模块 | 说明 |
+|------|------|
+| 选址态势 | Three.js 三维中国地图，展示电站分布与省级下钻 |
+| 资源收益评估 | 多维图表分析资源潜力与收益相关指标 |
+| 实时选址 | 点击地图坐标，调用后端模型输出 PVPI 等结果 |
 
-### 技术亮点
-- 🎨 **3D地图可视化**：基于Three.js的高性能3D地图渲染
-- 🤖 **AI智能选址**：GAT + GBDT集成模型，精准预测选址潜力
-- 📊 **丰富图表**：ECharts驱动的多维度数据展示
-- 🏙️ **省级下钻**：支持点击省份查看城市级详细信息
-- 💡 **数据驱动**：结合地理信息、气象数据等多源数据
+技术要点：Vue 3 + Vite 前端大屏、Flask API、GBDT（可选 GAT）推理、NASA POWER 气候数据、ECharts 图表。
 
-## 🏗️ 项目架构
+## 仓库结构
 
-```
+采用前后端分离的双工程根布局：
+
+```text
 .
-├── api_server.py              # 基础API服务
-├── api_server_full.py         # 完整API服务（含AI模型）
-├── requirements.txt           # Python依赖
-├── dashboard/                 # 前端可视化
+├── LICENSE
+├── README.md
+├── frontend/                 # Vue 3 + Vite 可视化大屏
 │   ├── src/
-│   │   ├── App.vue           # 主应用组件
-│   │   └── components/
-│   │       └── ThreeChinaMap.vue  # 3D地图组件
-│   ├── package.json
-│   └── vite.config.js
-├── models/                    # 机器学习模型
-├── CPVPD-2024_4326/          # 地理数据
-└── solar_data_output/        # 输出数据
+│   ├── public/data/          # 前端演示用轻量静态数据
+│   ├── scripts/sync-data.mjs
+│   └── package.json
+└── backend/                  # Flask API 与离线脚本
+    ├── main.py               # 统一启动入口
+    ├── pyproject.toml        # 推荐用 uv 管理依赖
+    ├── requirements.txt
+    ├── src/
+    │   ├── api/              # HTTP 接口
+    │   └── lib/              # 工具库与路径常量
+    ├── scripts/              # 数据拉取、评分、冒烟测试等
+    ├── data/                 # 本地数据（默认不入库，体积大）
+    ├── models/               # 模型权重（默认不入库）
+    └── resource/             # 运行日志等（默认不入库）
 ```
 
-## 🛠️ 技术栈
+> 地理原始数据、处理后的全量站点表、模型 `.pkl` 等大文件已写入 `.gitignore`，需自行准备到 `backend/data/`、`backend/models/`。
 
-### 前端
-- **Vue 3** - 渐进式JavaScript框架
-- **Three.js** - 3D图形库
-- **ECharts** - 数据可视化库
-- **Vite** - 下一代前端构建工具
-- **D3.js** - 地理数据处理
+## 技术栈
 
-### 后端
-- **Python** - 主要编程语言
-- **Flask** - Web框架
-- **PyTorch / PyTorch Geometric** - 深度学习框架
-- **Scikit-learn** - 机器学习库
-- **GeoPandas** - 地理空间数据处理
+**前端**：Vue 3、Vite、Three.js、ECharts、D3（地理相关处理）
 
-### 数据与模型
-- **GAT (Graph Attention Network)** - 图注意力网络
-- **GBDT (Gradient Boosting Decision Tree)** - 梯度提升决策树
-- **PVPI (Photovoltaic Potential Index)** - 光伏潜力指数
+**后端**：Python 3.10+、Flask、NumPy / Pandas / SciPy / scikit-learn、LightGBM / XGBoost；可选 PyTorch + PyTorch Geometric（GAT）
 
-## 🚀 快速开始
+**指标**：PVPI（光伏潜力指数）、GHI 等气象与空间特征
 
-### 环境要求
+## 环境要求
 
-- Python 3.8+
-- Node.js 16+
-- npm 或 yarn
+- Python **3.10+**（推荐使用 [uv](https://github.com/astral-sh/uv)）
+- Node.js 18+（或 16+）与 npm
+- 实时选址的完整模型模式需要可访问 [NASA POWER](https://power.larc.nasa.gov/) 的网络
 
-### 后端启动
+## 快速开始
 
-1. 安装Python依赖：
+### 1. 准备本地数据与模型（按需）
+
+仓库默认不含大体积数据。本地需具备例如：
+
+| 路径 | 说明 |
+|------|------|
+| `backend/models/model_gbdt_runtime.pkl` | 无 torch 时的 GBDT 运行包（推荐） |
+| `backend/models/model_gat_gbdt_pvssi.pkl` | 完整 GAT+GBDT 包（可选，需 torch） |
+| `backend/data/solar/pv_stations_mcdm_scored.csv` | 站点评分表，供前端 `sync:data` 同步 |
+
+若仅有完整 pickle、缺少运行包，可在已安装 torch 的环境执行：
+
 ```bash
+cd backend
+python scripts/export_gbdt_runtime.py
+```
+
+### 2. 启动后端
+
+```bash
+cd backend
+uv sync
+uv run python main.py
+```
+
+默认监听 `http://127.0.0.1:5000`。
+
+可选：
+
+```bash
+uv run python main.py --mode full|simple|base
+# 需要 GAT 推理时（下载较大）：
+uv sync --group torch
+```
+
+也可用 pip：
+
+```bash
+cd backend
 pip install -r requirements.txt
+python main.py
 ```
 
-2. 启动API服务：
+冒烟测试（不依赖外网 NASA，使用 mock）：
+
 ```bash
-python api_server_full.py
+cd backend
+uv run python scripts/smoke_api.py
 ```
 
-### 前端启动
+### 3. 启动前端
 
-1. 进入前端目录：
 ```bash
-cd dashboard
-```
-
-2. 安装依赖：
-```bash
+cd frontend
 npm install
-```
-
-3. 启动开发服务器：
-```bash
+npm run sync:data   # 从 backend/data/solar 同步站点统计（若本地有数据）
 npm run dev
 ```
 
-4. 构建生产版本：
+开发服务默认：`http://127.0.0.1:5173`（已将 `/api` 代理到后端 `5000` 端口）。
+
+生产构建：
+
 ```bash
 npm run build
+npm run preview
 ```
 
-## 📊 数据说明
+## 数据与模型说明
 
 ### 核心指标
-- **PVPI指数**：光伏潜力综合评分
-- **GHI辐照**：水平面总辐照量
-- **可建设面积**：适宜建设光伏电站的土地面积
-- **电站数量**：现有光伏电站统计
 
-### 数据文件
-项目数据文件位于 `dashboard/public/data/`：
-- `china_full.json` - 中国地理边界数据
-- `provincial_statistics.csv` - 省级统计数据
-- `pv_stations_mcdm_scored.csv` - 光伏电站评分数据
+- **PVPI**：光伏潜力综合评分（演示用指数）
+- **GHI**：水平面总辐照等相关气象量
+- **面积 / 电站数量**：省级或站点统计展示
 
-## 🤖 AI模型
+### 前端静态数据
 
-### 模型架构
-系统采用GAT + GBDT集成模型：
-- **GAT模型**：捕捉地理空间依赖关系
-- **GBDT模型**：处理结构化特征
-- **集成策略**：加权融合双模型预测结果
+位于 `frontend/public/data/`：
 
-### 模型输入特征
-- 气象数据（辐照、温度、降水等）
-- 地理特征（海拔、坡度、坡向等）
-- 社会经济因素（土地成本、电网接入等）
+- `china_full.json`：中国地理边界（演示用）
+- `provincial_statistics.csv`：省级统计
+- `pv_stations_mcdm_scored.csv`：可由 `npm run sync:data` 从后端数据目录生成（全量表默认不强制入库）
 
-## 🎯 使用说明
+### 推理说明
 
-### 基本操作
-1. **视图切换**：顶部标签页切换不同功能模块
-2. **地图交互**：
-   - 滚轮缩放
-   - 拖拽平移
-   - 左键点击省份进入城市视图
-   - 右键返回全国视图
-3. **数据探索**：通过侧边栏面板深入分析各维度数据
+- 默认推荐 **GBDT 运行包**（无需下载 torch）
+- 安装 torch 且加载完整权重后，可启用 GAT 回归路径
+- 实时预测依赖 NASA POWER；气候数据无效时会明确报错，避免静默给出错误高分
 
-### 选址流程
-1. 查看全国光伏资源分布态势
-2. 筛选高潜力省份
-3. 进入省级视图查看城市详情
-4. 结合AI推荐和数据分析确定最佳选址
+## 使用提示
 
-## 🔧 开发指南
+1. 顶部标签切换「选址态势 / 资源收益 / 实时选址」等模块  
+2. 地图：滚轮缩放、拖拽平移；左键省份下钻，右键返回全国  
+3. 实时选址：点击地图取点，等待后端返回 PVPI、等级与气象摘要  
 
-### 项目结构说明
-- `api_server_full.py` - 完整后端，包含模型加载
-- `calc_mcdm_pvpi.py` - PVPI计算核心逻辑
-- `ThreeChinaMap.vue` - 3D地图组件
-- `App.vue` - 主应用界面
+## 开发说明
 
-### 添加新模型
-1. 将模型文件放入 `models/models/` 目录
-2. 在 `api_server_full.py` 中加载新模型
-3. 更新前端预测接口调用
+| 路径 | 作用 |
+|------|------|
+| `backend/main.py` | 后端统一入口 |
+| `backend/src/api/app_full.py` | 完整预测服务 |
+| `backend/src/lib/paths.py` | 数据/模型路径常量 |
+| `backend/scripts/calc_mcdm_pvpi.py` | PVPI 评分脚本示例 |
+| `frontend/src/App.vue` | 大屏主界面 |
+| `frontend/src/components/ThreeChinaMap.vue` | 三维地图组件 |
 
-## 📝 注意事项
+欢迎通过 Issue / PR 讨论学习问题；请勿提交大体积数据、密钥或个人隐私信息。
 
-- 模型文件体积较大，使用Git LFS管理
-- 地理数据需保持坐标系一致性
-- 前端构建前需确保数据同步：`npm run sync:data`
+## 免责声明
 
-## 👥 作者
+- 本项目输出仅为算法与可视化**演示结果**，不能替代专业勘测、规划或合规评估。  
+- 第三方数据（如 NASA POWER、公开地理边界等）请遵守其各自使用条款。  
+- 作者不对依据本项目作出的任何决策承担责任。
 
-**LinJJ12** - 项目主要开发者
+## 作者
 
-## 📄 许可证
+**LinJJ12**
 
-本项目仅供学习和研究使用。
+## 许可证
+
+见根目录 [LICENSE](./LICENSE)：仅供学习与研究，禁止商业使用（除非另行获得书面授权）。
 
 ---
 
-**让清洁能源点亮未来！** 🌞
+学习交流，清洁能源。

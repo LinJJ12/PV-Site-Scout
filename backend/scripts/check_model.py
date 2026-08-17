@@ -1,7 +1,11 @@
+import _bootstrap  # noqa: F401
+
 import pickle
 import numpy as np
 
-model_path = 'models/models/model_gat_gbdt_pvssi.pkl'
+from src.lib.paths import GAT_GBDT_MODEL
+
+model_path = GAT_GBDT_MODEL
 
 with open(model_path, 'rb') as f:
     model = pickle.load(f)
