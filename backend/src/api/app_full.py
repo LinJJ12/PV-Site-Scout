@@ -1,11 +1,26 @@
+"""完整预测服务。
+
+默认优先加载 GBDT 运行包（model_gbdt_runtime.pkl）：推理快、不依赖 torch。
+仅当运行包缺失时才回退到 GAT+GBDT 完整包，并按需惰性导入 torch。
+"""
+
+import logging
+import os
 import pickle
 
 import numpy as np
-import pandas as pd
 from flask import Flask, jsonify, request
 from scipy.spatial import cKDTree
 
-from src.api.app import classify_pvpi, get_nasa_solar_data, parse_lat_lon, predict_simple_value
+from src.api.app import (
+    classify_pvpi,
+    get_nasa_solar_data,
+    get_real_solar_data,
+    parse_lat_lon,
+    predict_simple_value,
+    rate_limited,
+    _classify_error_response,
+)
 from src.lib.paths import GAT_GBDT_MODEL, GBDT_RUNTIME_MODEL
 
 try:
@@ -14,14 +29,7 @@ except ImportError:
     def CORS(app):
         return app
 
-try:
-    import torch
-    import torch.nn.functional as F
-    from torch_geometric.data import Data
-    from torch_geometric.nn import GATConv
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
@@ -30,8 +38,39 @@ model_package = None
 gat_model = None
 use_full_model = False
 
+# torch / torch_geometric 惰性导入：常规 GBDT 推理完全不需要 torch，
+# 只有加载 GAT 完整包时才会真正 import，避免无谓的启动开销。
+TORCH_AVAILABLE = False
+torch = None
+F = None
 
-if TORCH_AVAILABLE:
+
+def _try_import_torch():
+    """按需导入 torch/torch_geometric，成功时返回 True。"""
+    global TORCH_AVAILABLE, torch, F
+    if TORCH_AVAILABLE:
+        return True
+    try:
+        import torch as _torch
+        import torch.nn.functional as _F
+        from torch_geometric.data import Data  # noqa: F401
+        from torch_geometric.nn import GATConv  # noqa: F401
+
+        torch = _torch
+        F = _F
+        TORCH_AVAILABLE = True
+    except ImportError:
+        TORCH_AVAILABLE = False
+    return TORCH_AVAILABLE
+
+
+def _build_gat_model(package):
+    """从完整包构建 GAT 模型；torch 不可用或参数缺失时返回 None。"""
+    global gat_model
+    if not _try_import_torch():
+        return None
+    from torch_geometric.nn import GATConv
+
     class GATModel(torch.nn.Module):
         def __init__(self, in_channels, hidden_channels=64, heads=4, dropout=0.25, num_classes=3):
             super().__init__()
@@ -62,6 +101,23 @@ if TORCH_AVAILABLE:
             logits = self.cls_head(h)
             return reg, logits
 
+    try:
+        params = package["gat_params"]
+        model = GATModel(
+            in_channels=params["in_channels"],
+            hidden_channels=params["hidden_channels"],
+            heads=params["heads"],
+            dropout=params["dropout"],
+            num_classes=params["num_classes"],
+        )
+        model.load_state_dict(package["gat_state_dict"], strict=True)
+        model.eval()
+        gat_model = model
+        return model
+    except Exception as exc:
+        logger.warning("GAT 模型构建失败，将仅使用 GBDT 推理: %s", exc)
+        return None
+
 
 K_NEIGHBORS = 10
 MODEL_LEVEL_LABELS = {
@@ -84,47 +140,34 @@ MODEL_LEVEL_SUITABILITY = {
 
 
 def load_full_model():
+    """加载模型包：优先 GBDT 运行包，缺失时回退 GAT 完整包。"""
     global model_package, gat_model, use_full_model
-    # 无 torch 时优先加载已导出的 GBDT 运行包，避免 pickle 依赖 torch
-    if TORCH_AVAILABLE:
-        candidates = [GAT_GBDT_MODEL, GBDT_RUNTIME_MODEL]
-    else:
-        candidates = [GBDT_RUNTIME_MODEL, GAT_GBDT_MODEL]
 
-    model_path = next((p for p in candidates if p.exists()), None)
-    if model_path is None:
+    if GBDT_RUNTIME_MODEL.exists():
+        model_path = GBDT_RUNTIME_MODEL
+    elif GAT_GBDT_MODEL.exists():
+        model_path = GAT_GBDT_MODEL
+    else:
+        logger.warning("未找到模型包（%s / %s），将只提供简化公式", GBDT_RUNTIME_MODEL.name, GAT_GBDT_MODEL.name)
         return False
 
     try:
         with open(model_path, "rb") as f:
             model_package = pickle.load(f)
-
-        if TORCH_AVAILABLE and "gat_state_dict" in model_package:
-            params = model_package["gat_params"]
-            gat_model = GATModel(
-                in_channels=params["in_channels"],
-                hidden_channels=params["hidden_channels"],
-                heads=params["heads"],
-                dropout=params["dropout"],
-                num_classes=params["num_classes"],
-            )
-            gat_model.load_state_dict(model_package["gat_state_dict"], strict=True)
-            gat_model.eval()
-            use_full_model = True
-        elif "gbdt_models" in model_package:
-            use_full_model = True
-            if not TORCH_AVAILABLE:
-                print(f"[INFO] 已加载 GBDT 运行包（无 torch）: {model_path.name}")
-        return use_full_model
-    except Exception as e:
-        print(f"[ERROR] 模型加载失败: {e}")
+    except Exception as exc:
+        logger.exception("模型包加载失败 %s: %s", model_path, exc)
         model_package = None
         gat_model = None
         use_full_model = False
         return False
 
+    use_full_model = "gbdt_models" in model_package
+    if use_full_model and "gat_state_dict" in model_package:
+        _build_gat_model(model_package)
 
-load_full_model()
+    if use_full_model:
+        logger.info("已加载模型包 %s（%s）", model_path.name, _model_type_label())
+    return use_full_model
 
 
 def _iter_gbdt_models(gbdt_models):
@@ -144,6 +187,8 @@ def transform_with_fitted_gbdt(X, scaler, gbdt_models):
 
 
 def build_knn_edge_index(xy, k=K_NEIGHBORS):
+    if not TORCH_AVAILABLE:
+        raise RuntimeError("torch 未加载，无法构建 GAT 推理图")
     tree = cKDTree(xy)
     k_eff = min(k + 1, len(xy))
     _, indices = tree.query(xy, k=k_eff)
@@ -217,30 +262,17 @@ def _model_type_label():
     return "GBDT模型"
 
 
+load_full_model()
+
+
 def _pvssi_to_pvpi(pvssi_value):
     pvssi_clipped = float(np.clip(pvssi_value, 0.0, 100.0))
     return max(0.1, min(0.99, pvssi_clipped / 100.0))
 
 
-def _gbdt_pvpi(gbdt_pred_mean, model_package):
-    y_min = float(model_package["train_df_minimal"]["PVSSI_rule"].min())
-    y_max = float(model_package["train_df_minimal"]["PVSSI_rule"].max())
-    if y_max <= y_min:
-        return 0.5
-    return max(0.1, min(0.99, (gbdt_pred_mean - y_min) / (y_max - y_min)))
-
-
-def _resolve_level(level_key, pvpi):
-    level = MODEL_LEVEL_LABELS.get(level_key)
-    if level is None:
-        level, _, _ = classify_pvpi(pvpi)
-    elif pvpi >= 0.8 and level_key == "high":
-        level = "优选区"
-    return level
-
-
 def predict_simple(lat, lon):
-    solar_data = get_nasa_solar_data(lat, lon)
+    # 与基础模式保持一致：NASA 不可用时回退最近站点，保证离线可用
+    solar_data = get_real_solar_data(lat, lon)
     pvpi = predict_simple_value(solar_data)
     level, level_color, suitability = classify_pvpi(pvpi)
     return {
@@ -287,6 +319,10 @@ def _full_prediction(lat, lon):
     gat_probs = None
 
     if TORCH_AVAILABLE and gat_model is not None and "train_aug_features" in model_package:
+        from torch_geometric.data import Data
+
+        import torch as _torch
+
         X_train = model_package["train_features"].astype(np.float32)
         X_combined = np.vstack([X_train, X_cand])
         X_aug_combined = transform_with_fitted_gbdt(X_combined, x_scaler, gbdt_models)
@@ -299,10 +335,10 @@ def _full_prediction(lat, lon):
         new_idx = len(X_train)
 
         data = Data(
-            x=torch.tensor(X_aug_combined, dtype=torch.float32),
+            x=_torch.tensor(X_aug_combined, dtype=_torch.float32),
             edge_index=edge_index,
         )
-        with torch.no_grad():
+        with _torch.no_grad():
             reg_out, cls_out = gat_model(data.x, data.edge_index)
             reg_value = reg_out[new_idx]
             if hasattr(reg_value, "dim") and reg_value.dim() > 0:
@@ -346,23 +382,18 @@ def _full_prediction(lat, lon):
     return result
 
 
-def predict_full(lat, lon):
-    return _full_prediction(lat, lon)
-
-
 @app.route("/api/predict", methods=["GET"])
+@rate_limited
 def predict():
     try:
         lat, lon = parse_lat_lon(request.args)
         mode = request.args.get("mode", "simple")
         if mode == "full" and model_package is None:
             return jsonify({"error": "完整模型未加载"}), 503
-        result = predict_full(lat, lon) if mode == "full" else predict_simple(lat, lon)
+        result = _full_prediction(lat, lon) if mode == "full" else predict_simple(lat, lon)
         return jsonify(result)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        return _classify_error_response(exc)
 
 
 @app.route("/api/status", methods=["GET"])
@@ -382,29 +413,30 @@ def status():
     })
 
 
-@app.route("/api/debug_model", methods=["GET"])
-def debug_model():
-    try:
-        lat, lon = parse_lat_lon({
-            "lat": request.args.get("lat", 31.23),
-            "lon": request.args.get("lon", 121.47),
-        })
-        result = _full_prediction(lat, lon)
-        return jsonify({
-            "input_lat": lat,
-            "input_lon": lon,
-            "feature_cols": model_package["feature_cols"],
-            "pvpi": result["pvpi"],
-            "pvssi_model": result.get("pvssi_model"),
-            "gbdt_pred": result.get("gbdt_pred"),
-            "level": result.get("level"),
-            "gat_probs": result.get("gat_probs"),
-            "solar_data": result.get("solar_data"),
-        })
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+if os.environ.get("PV_ENABLE_DEBUG_ENDPOINTS", "").lower() in {"1", "true", "yes"}:
+
+    @app.route("/api/debug_model", methods=["GET"])
+    def debug_model():
+        """调试端点：默认关闭，需设置 PV_ENABLE_DEBUG_ENDPOINTS=1 才启用。"""
+        try:
+            lat, lon = parse_lat_lon({
+                "lat": request.args.get("lat", 31.23),
+                "lon": request.args.get("lon", 121.47),
+            })
+            result = _full_prediction(lat, lon)
+            return jsonify({
+                "input_lat": lat,
+                "input_lon": lon,
+                "feature_cols": model_package["feature_cols"],
+                "pvpi": result["pvpi"],
+                "pvssi_model": result.get("pvssi_model"),
+                "gbdt_pred": result.get("gbdt_pred"),
+                "level": result.get("level"),
+                "gat_probs": result.get("gat_probs"),
+                "solar_data": result.get("solar_data"),
+            })
+        except Exception as exc:
+            return _classify_error_response(exc)
 
 
 @app.route("/api/toggle_mode", methods=["POST"])

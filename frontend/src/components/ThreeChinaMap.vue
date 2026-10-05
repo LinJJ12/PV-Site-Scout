@@ -715,6 +715,8 @@ const animate = () => {
 const handleResize = () => {
   if (!rootRef.value || !camera || !renderer) return;
   const { width, height } = rootRef.value.getBoundingClientRect();
+  // 容器不可见（宽高为 0）时跳过，避免相机 aspect 变为 NaN
+  if (width < 10 || height < 10) return;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
   renderer.setSize(width, height);

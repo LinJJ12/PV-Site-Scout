@@ -59,6 +59,10 @@ backend/data/
 backend/resource/
 backend/models/
 
+# 根目录下的研究用训练产物与数据抓取输出（保留在本地，不入库）
+/models/
+/solar_data_output/
+
 # 机器学习与序列化产物
 *.pkl
 *.joblib

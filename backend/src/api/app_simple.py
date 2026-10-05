@@ -1,6 +1,13 @@
 from flask import Flask, jsonify, request
 
-from src.api.app import classify_pvpi, get_real_solar_data, parse_lat_lon, predict_simple_value
+from src.api.app import (
+    _classify_error_response,
+    classify_pvpi,
+    get_real_solar_data,
+    parse_lat_lon,
+    predict_simple_value,
+    rate_limited,
+)
 
 try:
     from flask_cors import CORS
@@ -13,6 +20,7 @@ CORS(app)
 
 
 @app.route("/api/predict", methods=["GET"])
+@rate_limited
 def predict():
     try:
         lat, lon = parse_lat_lon(request.args)
@@ -38,10 +46,8 @@ def predict():
                 "source": solar_data.get("source", "unknown"),
             },
         })
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        return _classify_error_response(exc)
 
 
 @app.route("/api/status", methods=["GET"])
@@ -60,4 +66,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=False)

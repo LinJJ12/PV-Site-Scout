@@ -1,4 +1,10 @@
+import logging
+import math
+import os
+import threading
 import time
+from collections import defaultdict, deque
+from functools import wraps
 
 import numpy as np
 import pandas as pd
@@ -14,11 +20,87 @@ except ImportError:
     def CORS(app):
         return app
 
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 CORS(app)
 nasa_api = SolarRadiationAPI()
 station_data = None
 station_tree = None
+_station_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# NASA POWER 结果缓存
+#
+# NASA POWER 数据为 0.5°×0.5° 网格的历史数据（不会变化），官方文档明确提示
+# “对同一位置持续重复请求可能被限制”。因此这里按 0.5° 网格单元缓存响应：
+# 相邻点击命中同一网格时无需重复出网请求。
+# 可用环境变量 PV_NASA_CACHE_TTL（秒，默认 24h）调整。
+# ---------------------------------------------------------------------------
+NASA_CACHE_TTL = float(os.environ.get("PV_NASA_CACHE_TTL", 24 * 3600))
+NASA_CACHE_MAX = 2048
+_nasa_cache = {}
+_nasa_cache_lock = threading.Lock()
+
+
+def _grid_cell(lat, lon):
+    """将经纬度映射到 0.5° 网格单元（NASA POWER 数据分辨率）。"""
+    return (round(math.floor(lat * 2) / 2.0, 1), round(math.floor(lon * 2) / 2.0, 1))
+
+
+def _cache_get(key):
+    entry = _nasa_cache.get(key)
+    if entry is None:
+        return None
+    value, ts = entry
+    if time.monotonic() - ts > NASA_CACHE_TTL:
+        with _nasa_cache_lock:
+            _nasa_cache.pop(key, None)
+        return None
+    return value
+
+
+def _cache_put(key, value):
+    with _nasa_cache_lock:
+        if len(_nasa_cache) >= NASA_CACHE_MAX:
+            # 淘汰最早写入的条目，避免缓存无限膨胀
+            oldest = min(_nasa_cache, key=lambda k: _nasa_cache[k][1])
+            _nasa_cache.pop(oldest, None)
+        _nasa_cache[key] = (value, time.monotonic())
+
+
+# ---------------------------------------------------------------------------
+# 轻量级接口限流（每 IP 滑动窗口）
+#
+# /api/predict 会触发对 NASA POWER 的出网请求，限流用于防止滥用拖垮服务
+# 或导致本机 IP 被 NASA 限制。默认 60 次/分钟，可用 PV_RATE_LIMIT_PER_MIN
+# 覆盖（<=0 表示关闭）。
+# ---------------------------------------------------------------------------
+RATE_LIMIT_PER_MIN = int(os.environ.get("PV_RATE_LIMIT_PER_MIN", 60))
+_rate_lock = threading.Lock()
+_rate_buckets = defaultdict(deque)
+
+
+def rate_limited(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if RATE_LIMIT_PER_MIN > 0:
+            ip = request.remote_addr or "unknown"
+            now = time.monotonic()
+            with _rate_lock:
+                bucket = _rate_buckets[ip]
+                while bucket and now - bucket[0] > 60:
+                    bucket.popleft()
+                if len(bucket) >= RATE_LIMIT_PER_MIN:
+                    return jsonify({"error": "请求过于频繁，请稍后再试"}), 429
+                bucket.append(now)
+                if len(_rate_buckets) > 10000:
+                    stale = [k for k, v in _rate_buckets.items() if not v or now - v[-1] > 3600]
+                    for k in stale:
+                        _rate_buckets.pop(k, None)
+        return view(*args, **kwargs)
+
+    return wrapper
 
 
 def parse_lat_lon(args):
@@ -59,31 +141,46 @@ def load_station_data():
     if station_data is not None:
         return station_data, station_tree
 
-    possible_paths = [
-        DATA_SOLAR / "pv_stations_mcdm_scored.csv",
-        FRONTEND_PUBLIC_DATA / "pv_stations_mcdm_scored.csv",
-        FRONTEND_DIST_DATA / "pv_stations_mcdm_scored.csv",
-    ]
+    with _station_lock:
+        if station_data is not None:
+            return station_data, station_tree
 
-    data_path = None
-    for path in possible_paths:
-        if path.exists():
-            data_path = path
-            break
+        possible_paths = [
+            DATA_SOLAR / "pv_stations_mcdm_scored.csv",
+            FRONTEND_PUBLIC_DATA / "pv_stations_mcdm_scored.csv",
+            FRONTEND_DIST_DATA / "pv_stations_mcdm_scored.csv",
+        ]
 
-    if data_path is None:
-        raise FileNotFoundError(f"无法找到光伏电站数据文件。已搜索路径: {possible_paths}")
+        data_path = None
+        for path in possible_paths:
+            if path.exists():
+                data_path = path
+                break
 
-    station_data = pd.read_csv(data_path)
-    station_tree = cKDTree(station_data[["lon", "lat"]].to_numpy())
-    return station_data, station_tree
+        if data_path is None:
+            raise FileNotFoundError(f"无法找到光伏电站数据文件。已搜索路径: {possible_paths}")
+
+        loaded = pd.read_csv(data_path)
+        loaded_tree = cKDTree(loaded[["lon", "lat"]].to_numpy())
+        station_data = loaded
+        station_tree = loaded_tree
+        return station_data, station_tree
 
 
 def get_nasa_solar_data(lat, lon, retries=3):
+    """获取 NASA POWER 气候数据（带 0.5° 网格缓存与重试）。"""
+    key = _grid_cell(lat, lon)
+    cached = _cache_get(key)
+    if cached is not None:
+        result = dict(cached)
+        result["source"] = "NASA POWER 2020-2023 (cached)"
+        return result
+
     last_error = None
     for attempt in range(retries):
         solar_data = nasa_api.get_solar_data(lat, lon, start_year=2020, end_year=2023)
         if solar_data is not None:
+            _cache_put(key, dict(solar_data))
             solar_data["source"] = "NASA POWER 2020-2023"
             return solar_data
         last_error = f"NASA POWER 第 {attempt + 1} 次请求无数据"
@@ -95,10 +192,12 @@ def get_nasa_solar_data(lat, lon, retries=3):
 
 
 def get_real_solar_data(lat, lon):
-    solar_data = nasa_api.get_solar_data(lat, lon, start_year=2020, end_year=2023)
-    if solar_data is not None:
-        solar_data["source"] = "NASA POWER 2020-2023"
+    try:
+        solar_data = get_nasa_solar_data(lat, lon)
+        solar_data["source"] = solar_data.get("source", "NASA POWER 2020-2023")
         return solar_data
+    except RuntimeError:
+        logger.warning("NASA POWER 不可用，回退到最近站点气候数据 (%.4f, %.4f)", lat, lon)
 
     stations, tree = load_station_data()
     distance, index = tree.query([lon, lat], k=1)
@@ -165,7 +264,20 @@ def predict_simple(lat, lon):
     }
 
 
+def _classify_error_response(exc):
+    """按异常类型决定响应码与对外消息，避免泄露内部细节。"""
+    if isinstance(exc, ValueError):
+        # 校验类错误消息由本项目产生，可安全返回
+        return jsonify({"error": str(exc)}), 400
+    if isinstance(exc, RuntimeError):
+        # NASA/网络等可预期错误，消息可读且安全
+        return jsonify({"error": str(exc)}), 503
+    logger.exception("接口处理异常: %s", exc)
+    return jsonify({"error": "服务器内部错误，请稍后重试"}), 500
+
+
 @app.route("/api/predict", methods=["GET"])
+@rate_limited
 def predict():
     try:
         lat, lon = parse_lat_lon(request.args)
@@ -191,10 +303,8 @@ def predict():
                 "source": solar_data.get("source", "unknown"),
             },
         })
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception as exc:
+        return _classify_error_response(exc)
 
 
 @app.route("/api/status", methods=["GET"])
@@ -213,4 +323,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=False)

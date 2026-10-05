@@ -250,6 +250,11 @@ const mouseCoords = ref(null);
 const useFullModel = ref(false);
 const torchAvailable = ref(false);
 const modelStatusText = ref("简化公式");
+// 实时选址请求的竞态保护
+let requestSeq = 0;
+let pendingAbort = null;
+// 用户是否手动切换过预测模型（切换后不再被后端状态自动覆盖）
+const modelChoiceTouched = ref(false);
 
 const fullModelButtonLabel = computed(() => (torchAvailable.value ? "GAT+GBDT" : "GBDT模型"));
 const fullModelHint = computed(() =>
@@ -388,7 +393,7 @@ const loadChinaMap = async () => {
   return chinaMapPromise;
 };
 
-const visibleCharts = computed(() => charts.filter(Boolean));
+const chartRefs = () => charts.filter(Boolean);
 
 const formatNumber = (value, digits = 0) =>
   Number(value || 0).toLocaleString("zh-CN", {
@@ -520,7 +525,7 @@ const loadData = async () => {
     };
     statsData.value = [];
     stationData.value = [];
-    visibleCharts.value.forEach((chart) => chart.dispose());
+    chartRefs().forEach((chart) => chart.dispose());
     charts.length = 0;
     throw error;
   }
@@ -650,7 +655,7 @@ const initChart = (chartRef) => {
 };
 
 const renderCharts = (stats, stations) => {
-  visibleCharts.value.forEach((chart) => chart.dispose());
+  chartRefs().forEach((chart) => chart.dispose());
   charts.length = 0;
   renderRadar(stats, stations);
 };
@@ -660,7 +665,7 @@ const renderActiveCharts = () => {
   const stations = stationData.value;
   if (!stats.length || !stations.length) return;
 
-  visibleCharts.value.forEach((chart) => chart.dispose());
+  chartRefs().forEach((chart) => chart.dispose());
   charts.length = 0;
 
   if (activeTab.value === "dashboard") {
@@ -999,7 +1004,7 @@ const renderRadar = (stats, stations) => {
 };
 
 const handleResize = () => {
-  visibleCharts.value.forEach((chart) => chart.resize());
+  chartRefs().forEach((chart) => chart.resize());
 };
 
 const API_BASES = [
@@ -1033,20 +1038,33 @@ const fetchFromApi = async (path, options = {}) => {
 };
 
 const fetchPrediction = async (lat, lon) => {
+  // 竞态保护：连续点击时旧请求的结果直接丢弃
+  const seq = ++requestSeq;
+  if (pendingAbort) pendingAbort.abort();
+  const controller = new AbortController();
+  pendingAbort = controller;
   isLoading.value = true;
   errorMessage.value = "";
   realtimeResult.value = null;
-  
+
+  const timeoutMs = useFullModel.value ? 120000 : 30000;
+  const makeSignal = () => {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    return typeof AbortSignal.any === "function"
+      ? AbortSignal.any([timeoutSignal, controller.signal])
+      : timeoutSignal;
+  };
+
   try {
     const mode = useFullModel.value ? "full" : "simple";
-    const timeoutMs = useFullModel.value ? 120000 : 30000;
     let lastError = null;
 
     for (const base of API_BASES) {
+      if (controller.signal.aborted) return;
       try {
         const response = await fetch(
           `${base}/api/predict?lat=${lat}&lon=${lon}&mode=${mode}`,
-          { signal: AbortSignal.timeout(timeoutMs) }
+          { signal: makeSignal() }
         );
         let result = null;
         try {
@@ -1069,31 +1087,40 @@ const fetchPrediction = async (lat, lon) => {
             throw new Error("PVPI 结果异常（恒为 1.00），请确认已启动最新版 backend");
           }
         }
+        if (seq !== requestSeq) return;
         realtimeResult.value = result;
         updateMapMarker(lat, lon, result.pvpi);
         return;
       } catch (error) {
+        if (controller.signal.aborted) return;
         lastError = error;
       }
     }
 
     if (useFullModel.value) {
+      if (seq !== requestSeq) return;
       throw lastError || new Error("完整模型后端不可用，请确认已启动：cd backend && uv run python main.py");
     }
 
+    if (seq !== requestSeq) return;
     const fallback = buildLocalPrediction(lat, lon, lastError?.message || "后端服务不可用");
     realtimeResult.value = fallback;
     updateMapMarker(lat, lon, fallback.pvpi);
-    
+
   } catch (error) {
-    errorMessage.value = error.message || "获取真实数据失败";
+    if (seq === requestSeq) {
+      errorMessage.value = error.message || "获取真实数据失败";
+    }
   } finally {
-    isLoading.value = false;
+    if (seq === requestSeq) {
+      isLoading.value = false;
+    }
   }
 };
 
 const toggleModel = async (mode) => {
   errorMessage.value = "";
+  modelChoiceTouched.value = true;
   try {
     const response = await fetchFromApi("/api/toggle_mode", {
       method: "POST",
@@ -1123,9 +1150,13 @@ const checkModelStatus = async () => {
     const result = await response.json();
     const modelLoaded = Boolean(result.model_loaded);
     torchAvailable.value = Boolean(result.torch_available);
-    useFullModel.value = modelLoaded;
-    modelStatusText.value = result.model_type || modelLabel(modelLoaded, torchAvailable.value);
+    // 仅在用户尚未手动切换过模型时同步后端状态，避免覆盖用户选择
+    if (!modelChoiceTouched.value) {
+      useFullModel.value = modelLoaded;
+      modelStatusText.value = result.model_type || modelLabel(modelLoaded, torchAvailable.value);
+    }
   } catch (error) {
+    if (modelChoiceTouched.value) return;
     useFullModel.value = false;
     torchAvailable.value = false;
     modelStatusText.value = "简化公式";
@@ -1184,14 +1215,18 @@ onMounted(async () => {
   tick();
   clockTimer = window.setInterval(tick, 1000);
   await loadChinaMap();
-  await loadData();
+  try {
+    await loadData();
+  } catch (error) {
+    // dataLoadError 已在 loadData 内写入并展示，这里避免未处理的 Promise 拒绝
+  }
   window.addEventListener("resize", handleResize);
 });
 
 onBeforeUnmount(() => {
   window.clearInterval(clockTimer);
   window.removeEventListener("resize", handleResize);
-  visibleCharts.value.forEach((chart) => chart.dispose());
+  chartRefs().forEach((chart) => chart.dispose());
 });
 </script>
 
