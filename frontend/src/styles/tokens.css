@@ -1,0 +1,39 @@
+/* ============================================================
+   大屏设计系统 · Design Tokens
+   设计稿：1920×1080，运行时等比缩放（useFitScreen）
+   原则：深蓝灰而非纯黑；一屏一主色 + 四语义色；发光只给数据元素
+   ============================================================ */
+:root {
+  color-scheme: dark;
+
+  /* -------- 背景层次 -------- */
+  --bg-0: #050d1f;
+  --bg-1: #0a1730;
+  --panel-bg: linear-gradient(160deg, rgba(13, 34, 64, 0.62), rgba(7, 19, 40, 0.5));
+  --panel-line: rgba(0, 212, 254, 0.22);
+  --panel-line-strong: rgba(0, 240, 255, 0.9);
+
+  /* -------- 主色与辅色 -------- */
+  --cyan: #00d4fe;
+  --cyan-soft: #7df0ff;
+  --blue-deep: #0e4b8f;
+  --blue-mid: #0f79c7;
+
+  /* -------- 语义四级（全站统一） -------- */
+  --grade-good: #00ffa3;  /* 优选区 */
+  --grade-fair: #00d4fe;  /* 适宜区 */
+  --grade-mid: #ffc53d;   /* 备选区 */
+  --grade-bad: #ff6b6b;   /* 约束区 */
+
+  /* -------- 地图 choropleth 色带（PVPI 低 → 高） -------- */
+  --map-scale: #0a2b52, #0e4b8f, #0f79c7, #00d4fe, #7df0ff;
+
+  /* -------- 文本 -------- */
+  --text-1: #e6f4ff;
+  --text-2: #8fb3d9;
+  --text-3: #5a7ca6;
+
+  /* -------- 字体 -------- */
+  --font-num: "Bahnschrift", "DIN Alternate", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-cn: "Microsoft YaHei", "PingFang SC", sans-serif;
+}

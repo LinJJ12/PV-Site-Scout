@@ -1,9 +1,22 @@
 <template>
-  <div class="screen" :class="{ 'data-load-error': dataLoadError }">
+  <div ref="screenRef" class="screen" :class="{ 'data-load-error': dataLoadError }">
+    <div class="scanline"></div>
+    <div class="frame-corner tl"></div><div class="frame-corner tr"></div>
+    <div class="frame-corner bl"></div><div class="frame-corner br"></div>
+    <transition name="boot-fade">
+      <div class="boot-loading" v-if="booting">
+        <div class="boot-mark"></div>
+        <div class="boot-bar"><b></b></div>
+        <p>正在接入真实选址数据</p>
+      </div>
+    </transition>
     <header class="screen-header">
       <div class="brand">
         <span class="brand-mark"></span>
-        <h1>光伏电站智能选址数据可视化大屏</h1>
+        <div>
+          <h1>光伏电站智能选址数据可视化大屏</h1>
+          <small>PV SITE INTELLIGENCE · REAL DATA EDITION</small>
+        </div>
       </div>
       <nav class="tabs" aria-label="数据视图">
         <button class="tab" :class="{ active: activeTab === 'dashboard' }" @click="activeTab = 'dashboard'">选址态势</button>
@@ -17,38 +30,30 @@
     </header>
 
     <main class="dashboard" v-if="activeTab === 'dashboard'">
-      <section class="side left-stack dashboard-left">
-        <article class="panel stats-panel">
-          <div class="panel-title"><span></span>全国光伏样本站统计<em>单位：座 / km2</em></div>
-          <div class="stats-panel-body">
-            <div class="metric-grid">
-              <div class="metric" v-for="item in metrics" :key="item.label">
-                <div class="metric-icon">{{ item.icon }}</div>
-                <div class="metric-content">
-                  <span>{{ item.label }}</span>
-                  <strong>{{ item.value }}<small>{{ item.unit }}</small></strong>
-                </div>
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel suitability-panel">
-          <div class="panel-title"><span></span>各等级选址占比<em>单位：%</em></div>
-          <div class="suitability-panel-body">
-            <div ref="suitabilityPieRef" class="suitability-chart"></div>
-            <div class="progress-list">
-              <div class="progress-item" v-for="grade in suitability" :key="grade.name">
+      <KpiStrip :items="kpiItems" class="dash-kpi" />
+      <aside class="dash-col">
+        <PanelCard title="各等级选址占比" note="SUITABILITY MIX" style="flex: 11;">
+          <div class="donut-wrap">
+            <div ref="suitabilityPieRef" class="chart-fill"></div>
+            <div class="donut-center"><strong>{{ summary.totalStations }}</strong><span>候选站点总数</span></div>
+            <div class="grade-rows">
+              <div class="grade-row" v-for="grade in suitability" :key="grade.name">
+                <i :style="{ background: grade.color, boxShadow: `0 0 6px ${grade.color}` }"></i>
                 <span>{{ grade.name }}</span>
-                <i><b :style="{ width: `${grade.value}%`, background: grade.color }"></b></i>
+                <span class="bar"><b :style="{ width: grade.value + '%', background: `linear-gradient(90deg, transparent, ${grade.color})` }"></b></span>
                 <strong>{{ grade.count }}</strong>
+                <span class="pct">{{ Number(grade.value).toFixed(1) }}%</span>
               </div>
             </div>
           </div>
-        </article>
-      </section>
+        </PanelCard>
 
-      <section class="center-stage dashboard-map-stage">
+        <PanelCard title="省域潜力梯队" :note="selectedProvince ? `${selectedProvince} · PVPI` : 'TOP 8 · PVPI'" style="flex: 9;">
+          <RankBars :items="rankItems" />
+        </PanelCard>
+      </aside>
+
+      <section class="dash-center">
         <div class="map-shell">
           <ThreeChinaMap
             v-if="chinaGeoJson"
@@ -58,52 +63,52 @@
             :stations="stationData"
             :province-names="provinceNames"
             :normalize-province-name="normalizeProvinceName"
+            :province-pvpi="provincePvpiMap"
             mode="dashboard"
             @province-focus="handleProvinceFocus"
             @map-pick="handleThreeMapPick"
           />
-          <div class="map-summary">
-            <span>PVPI 均值</span>
-            <strong>{{ summary.avgPvpi }}</strong>
-            <span>最大辐照</span>
-            <strong>{{ summary.maxGhi }} kWh/m2</strong>
+          <div class="map-chips">
+            <div class="chip"><span>PVPI 均值</span><strong>{{ summary.avgPvpi }}</strong></div>
+            <div class="chip"><span>最大辐照</span><strong>{{ summary.maxGhi }}</strong><small>kWh/m²</small></div>
           </div>
         </div>
       </section>
 
-      <section class="side right-stack dashboard-right">
-        <article class="panel hex-panel">
-          <div class="panel-title"><span></span>高潜力省份梯队<em>站点 / 面积</em></div>
-          <div class="scrollable-panel" style="height: calc(100% - 26px);">
-            <div class="hex-grid">
-              <div class="hex" v-for="province in provinceLeaders" :key="province.name">
-                <strong>{{ province.score }}</strong>
-                <span>{{ province.name }}</span>
-                <small>{{ province.area }} km2</small>
-              </div>
-            </div>
-          </div>
-        </article>
+      <aside class="dash-col">
+        <PanelCard title="资源与风险画像" note="NATIONAL PROFILE" style="flex: 8;">
+          <div ref="radarChartRef" class="chart-fill"></div>
+        </PanelCard>
 
-        <article class="panel chart-panel split-panel">
-          <div class="panel-title"><span></span>资源与风险画像<em>标准化</em></div>
-          <div ref="radarChartRef" class="chart half"></div>
-          <div class="risk-list">
-            <div><span>可建设面积</span><strong>{{ summary.totalArea }} km2</strong></div>
-            <div><span>候选站点</span><strong>{{ summary.totalStations }} 座</strong></div>
+        <PanelCard
+          :title="selectedProvince ? `${selectedProvince} · 候选电站评分` : '综合评分 TOP10 候选电站'"
+          :note="selectedProvince ? 'CLICK MAP TO RESET' : 'MCDM RANKING'"
+          style="flex: 12;"
+        >
+          <div class="board-wrap">
+            <AutoScrollTable
+              :columns="[
+                { key: 'rank', label: '排名', align: 'center' },
+                { key: 'provinceName', label: '省份' },
+                { key: 'area_km2', label: '可用面积 km²' },
+                { key: 'ghi_mean', label: 'GHI', align: 'right' },
+                { key: 'PVPI', label: 'PVPI', align: 'right', colorKey: 'gradeColor' }
+              ]"
+              :rows="topSites"
+            />
           </div>
-        </article>
-      </section>
+        </PanelCard>
+      </aside>
     </main>
 
     <main class="resource-profit-dashboard" v-else-if="activeTab === 'resourceProfit'">
       <article class="panel chart-panel">
-        <div class="panel-title"><span></span>省域平均潜力趋势<em>折线 / PVPI</em></div>
+        <div class="panel-title"><span></span>省域 PVPI 对比<em>折线 · TOP12</em></div>
         <div ref="trendChartRef" class="chart"></div>
       </article>
 
       <article class="panel chart-panel">
-        <div class="panel-title"><span></span>省域装机潜力排行<em>柱状 / km2</em></div>
+        <div class="panel-title"><span></span>省域装机潜力排行<em>条形 · km²</em></div>
         <div ref="barChartRef" class="chart"></div>
       </article>
 
@@ -118,12 +123,12 @@
       </article>
 
       <article class="panel chart-panel">
-        <div class="panel-title"><span></span>省域收益波动<em>K线 / PVPI 分布</em></div>
+        <div class="panel-title"><span></span>省域 PVPI 分布<em>箱线 · TOP10</em></div>
         <div ref="klineChartRef" class="chart"></div>
       </article>
 
       <article class="panel table-panel">
-        <div class="panel-title"><span></span>综合评分 TOP10 候选电站<em>真实样本</em></div>
+        <div class="panel-title"><span></span>综合评分 TOP10 候选电站<em>MCDM · 真实样本</em></div>
         <div class="scrollable-panel" style="height: calc(100% - 34px);">
           <table>
             <thead>
@@ -181,6 +186,22 @@
           </div>
         </article>
 
+        <PanelCard v-if="historyRecords.length" title="选址记录" note="HISTORY · 本次会话" class="history-panel">
+          <div class="history-list">
+            <button
+              class="history-row"
+              v-for="(rec, index) in historyRecords"
+              :key="rec.time + '-' + index"
+              type="button"
+              @click="rerunFromHistory(rec)"
+            >
+              <span class="h-time">{{ rec.time }}</span>
+              <span class="h-coord">{{ rec.lat.toFixed(2) }}, {{ rec.lon.toFixed(2) }}</span>
+              <strong class="h-pvpi" :style="{ color: rec.color }">{{ rec.pvpi.toFixed(2) }}</strong>
+            </button>
+          </div>
+        </PanelCard>
+
         <article class="panel result-panel analysis-panel">
           <div class="panel-title">
             <span></span>{{ realtimeResult ? "选址分析结果" : isLoading ? "正在分析..." : errorMessage ? "分析状态" : "实时选址分析" }}
@@ -201,7 +222,7 @@
 
           <div class="result-content" v-else-if="realtimeResult">
             <div class="result-hero" :style="{ '--score-color': realtimeResult.level_color }">
-              <div class="score-ring"><b>{{ Number(realtimeResult.pvpi).toFixed(2) }}</b><small>PVPI</small></div>
+              <div ref="realtimeGaugeRef" class="result-gauge"></div>
               <div class="result-hero-meta">
                 <div class="level-badge" :style="{ background: realtimeResult.level_color }">{{ realtimeResult.level }}</div>
                 <div class="suitability-text"><span>适配度</span><strong :style="{ color: realtimeResult.level_color }">{{ realtimeResult.suitability }}</strong></div>
@@ -238,11 +259,23 @@
 </template>
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import * as echarts from "echarts";
+import * as echarts from "echarts/core";
 import ThreeChinaMap from "./components/ThreeChinaMap.vue";
+import PanelCard from "./components/PanelCard.vue";
+import KpiStrip from "./components/KpiStrip.vue";
+import RankBars from "./components/RankBars.vue";
+import AutoScrollTable from "./components/AutoScrollTable.vue";
+import { useFitScreen } from "./composables/useFitScreen.js";
+import "./theme/bigscreen.js";
 
 const activeTab = ref("dashboard");
+const screenRef = ref(null);
+useFitScreen(screenRef);
 const realtimeResult = ref(null);
+const historyRecords = ref([]);
+const realtimeGaugeRef = ref(null);
+const booting = ref(true);
+let gaugeChart = null;
 const isLoading = ref(false);
 const errorMessage = ref("");
 const lastClickLatLng = ref(null);
@@ -320,10 +353,23 @@ const normalizeProvinceName = (name = "") =>
 
 const currentTime = ref("--:--:--");
 const currentDate = ref("");
-const metrics = ref([]);
 const suitability = ref([]);
-const topSites = ref([]);
-const provinceLeaders = ref([]);
+const topSitesAll = ref([]);
+const rankItemsAll = ref([]);
+const provincePvpiMap = ref({});
+const selectedProvince = ref("");
+const kpiItems = ref([]);
+const gradeThresholds = ref([0, 0, 0]);
+const topSites = computed(() =>
+  selectedProvince.value ? topSitesAll.value.filter((row) => row.provinceName === selectedProvince.value) : topSitesAll.value
+);
+const rankItems = computed(() => {
+  if (selectedProvince.value) {
+    const hit = provincePvpiMap.value[selectedProvince.value];
+    return Number.isFinite(Number(hit)) ? [{ name: selectedProvince.value, value: Number(hit) }] : [];
+  }
+  return rankItemsAll.value;
+});
 const resourceRows = ref([]);
 const profitRows = ref([]);
 const dataLoadError = ref("");
@@ -348,25 +394,8 @@ const charts = [];
 let clockTimer;
 
 const chartTheme = {
-  textStyle: { color: "#b9d8df" },
-  grid: { left: 42, right: 20, top: 28, bottom: 30 },
-  tooltip: {
-    trigger: "axis",
-    backgroundColor: "rgba(2, 14, 22, .96)",
-    borderColor: "rgba(68, 231, 248, .6)",
-    borderWidth: 1,
-    extraCssText: "box-shadow:0 0 18px rgba(39,231,243,.22);backdrop-filter:blur(6px);",
-    textStyle: { color: "#e8fbff" }
-  },
-  xAxis: {
-    axisLine: { lineStyle: { color: "rgba(142, 181, 192, .42)" } },
-    axisTick: { show: false },
-    axisLabel: { color: "#a8cbd2" }
-  },
-  yAxis: {
-    splitLine: { lineStyle: { color: "rgba(68, 231, 248, .13)", type: "dashed" } },
-    axisLabel: { color: "#a8cbd2" }
-  }
+  textStyle: { color: "#8fb3d9" },
+  grid: { left: 46, right: 28, top: 30, bottom: 32 }
 };
 
 let chinaMapPromise = null;
@@ -423,10 +452,19 @@ const calculateSimplePvpi = (solarData) => {
 };
 
 const classifyPvpi = (pvpi) => {
-  if (pvpi >= 0.8) return { level: "优选区", level_color: "#00ff88", suitability: "极高" };
-  if (pvpi >= 0.6) return { level: "适宜区", level_color: "#27e7f3", suitability: "高" };
-  if (pvpi >= 0.4) return { level: "备选区", level_color: "#f3df54", suitability: "中等" };
+  if (pvpi >= 0.8) return { level: "优选区", level_color: "#00ffa3", suitability: "极高" };
+  if (pvpi >= 0.6) return { level: "适宜区", level_color: "#00d4fe", suitability: "高" };
+  if (pvpi >= 0.4) return { level: "备选区", level_color: "#ffc53d", suitability: "中等" };
   return { level: "约束区", level_color: "#ff6b6b", suitability: "低" };
+};
+
+/* 静态数据 PVPI 为 0~100 分，按与首页占比一致的分位阈值分级（0~0.95 的实时预测走 classifyPvpi） */
+const gradeOf100 = (value) => {
+  const [t0, t1, t2] = gradeThresholds.value;
+  if (value >= t0) return { name: "优选区", color: "#00ffa3" };
+  if (value >= t1) return { name: "适宜区", color: "#00d4fe" };
+  if (value >= t2) return { name: "备选区", color: "#ffc53d" };
+  return { name: "约束区", color: "#ff6b6b" };
 };
 
 const buildLocalPrediction = (lat, lon, reason = "") => {
@@ -511,10 +549,12 @@ const loadData = async () => {
     renderActiveCharts();
   } catch (error) {
     dataLoadError.value = error.message || "真实数据加载失败";
-    metrics.value = [];
     suitability.value = [];
-    topSites.value = [];
-    provinceLeaders.value = [];
+    topSitesAll.value = [];
+    kpiItems.value = [];
+    rankItemsAll.value = [];
+    provincePvpiMap.value = {};
+    selectedProvince.value = "";
     resourceRows.value = [];
     profitRows.value = [];
     summary.value = {
@@ -550,7 +590,6 @@ const prepareCards = (stats, stations) => {
   const totalArea = stats.reduce((sum, row) => sum + row.Total_Area_km2, 0);
   const avgPvpi = stations.reduce((sum, row) => sum + row.PVPI, 0) / stations.length;
   const maxGhi = Math.max(...stations.map((row) => row.ghi_mean));
-  const avgTemp = stations.reduce((sum, row) => sum + row.temp_mean, 0) / stations.length;
 
   summary.value = {
     avgPvpi: formatNumber(avgPvpi, 2),
@@ -558,13 +597,6 @@ const prepareCards = (stats, stations) => {
     totalArea: formatNumber(totalArea, 1),
     totalStations: formatNumber(totalStations)
   };
-
-  metrics.value = [
-    { label: "候选电站", value: formatNumber(totalStations), unit: "座", icon: "站" },
-    { label: "覆盖省域", value: formatNumber(stats.length), unit: "个", icon: "省" },
-    { label: "可用面积", value: formatNumber(totalArea, 1), unit: "km2", icon: "面" },
-    { label: "平均温度", value: formatNumber(avgTemp, 1), unit: "°C", icon: "温" }
-  ];
 
   const sortedPvpi = [...stations].sort((a, b) => b.PVPI - a.PVPI);
   const thresholds = [
@@ -579,29 +611,32 @@ const prepareCards = (stats, stations) => {
     stations.filter((row) => row.PVPI < thresholds[2]).length
   ];
   suitability.value = [
-    { name: "优选区", value: Math.round((counts[0] / stations.length) * 100), count: formatNumber(counts[0]), color: "#27e7f3" },
-    { name: "适宜区", value: Math.round((counts[1] / stations.length) * 100), count: formatNumber(counts[1]), color: "#35f0a2" },
-    { name: "备选区", value: Math.round((counts[2] / stations.length) * 100), count: formatNumber(counts[2]), color: "#f3df54" },
-    { name: "约束区", value: Math.round((counts[3] / stations.length) * 100), count: formatNumber(counts[3]), color: "#ff8b38" }
+    { name: "优选区", value: Math.round((counts[0] / stations.length) * 100), count: formatNumber(counts[0]), color: "#00ffa3" },
+    { name: "适宜区", value: Math.round((counts[1] / stations.length) * 100), count: formatNumber(counts[1]), color: "#00d4fe" },
+    { name: "备选区", value: Math.round((counts[2] / stations.length) * 100), count: formatNumber(counts[2]), color: "#ffc53d" },
+    { name: "约束区", value: Math.round((counts[3] / stations.length) * 100), count: formatNumber(counts[3]), color: "#ff6b6b" }
+  ];
+  gradeThresholds.value = thresholds;
+
+  kpiItems.value = [
+    { label: "候选电站", value: totalStations, digits: 0, unit: "座", hero: true },
+    { label: "覆盖省域", value: stats.length, digits: 0, unit: "个" },
+    { label: "可用面积", value: totalArea, digits: 1, unit: "km²" },
+    { label: "平均 PVPI", value: avgPvpi, digits: 2, unit: "" },
+    { label: "最大辐照", value: maxGhi, digits: 2, unit: "kWh/m²" },
+    { label: "优选区占比", value: (counts[0] / stations.length) * 100, digits: 1, unit: "%" }
   ];
 
-  topSites.value = sortedPvpi.slice(0, 10).map((row) => ({
+  topSitesAll.value = sortedPvpi.slice(0, 10).map((row, index) => ({
     ...row,
+    rank: index + 1,
+    gradeColor: gradeOf100(row.PVPI).color,
     provinceName: provinceNames[row.province] || row.province,
     area_km2: formatNumber(row.area_km2, 2),
     ghi_mean: formatNumber(row.ghi_mean, 2),
     precip_annual: formatNumber(row.precip_annual, 0),
     PVPI: formatNumber(row.PVPI, 2)
   }));
-
-  provinceLeaders.value = [...stats]
-    .sort((a, b) => b.Total_Area_km2 - a.Total_Area_km2)
-    .slice(0, 6)
-    .map((row) => ({
-      name: provinceNames[row.province] || row.province,
-      score: formatNumber(row.Count),
-      area: formatNumber(row.Total_Area_km2, 0)
-    }));
 
   const stationGroups = stations.reduce((groups, row) => {
     if (!groups.has(row.province)) groups.set(row.province, []);
@@ -624,6 +659,16 @@ const prepareCards = (stats, stations) => {
       profitIndex: avgPvpi * row.Total_Area_km2
     };
   }).filter((row) => Number.isFinite(row.avgPvpi) && Number.isFinite(row.avgGhi));
+
+  provincePvpiMap.value = Object.fromEntries(
+    provinceSummary.filter((row) => Number.isFinite(row.avgPvpi)).map((row) => [row.provinceName, Number(row.avgPvpi.toFixed(2))])
+  );
+
+  rankItemsAll.value = [...provinceSummary]
+    .filter((row) => Number.isFinite(row.avgPvpi))
+    .sort((a, b) => b.avgPvpi - a.avgPvpi)
+    .slice(0, 8)
+    .map((row) => ({ name: row.provinceName, value: Number(row.avgPvpi.toFixed(2)) }));
 
   resourceRows.value = [...provinceSummary]
     .sort((a, b) => b.avgGhi - a.avgGhi)
@@ -649,7 +694,7 @@ const prepareCards = (stats, stations) => {
 };
 
 const initChart = (chartRef) => {
-  const chart = echarts.init(chartRef.value);
+  const chart = echarts.init(chartRef.value, "bigscreen");
   charts.push(chart);
   return chart;
 };
@@ -702,8 +747,8 @@ const renderProvincePvpi = (stats, stations) => {
   const chart = initChart(trendChartRef);
   chart.setOption({
     ...chartTheme,
-    xAxis: { ...chartTheme.xAxis, type: "category", data: provincePvpi.map((row) => row.province) },
-    yAxis: { ...chartTheme.yAxis, type: "value" },
+    xAxis: { type: "category", data: provincePvpi.map((row) => row.province) },
+    yAxis: { type: "value" },
     series: [
       {
         type: "line",
@@ -711,21 +756,21 @@ const renderProvincePvpi = (stats, stations) => {
         symbol: "circle",
         symbolSize: 8,
         smooth: true,
-        lineStyle: { color: "#27e7f3", width: 3, shadowBlur: 12, shadowColor: "rgba(39, 231, 243, .5)" },
+        lineStyle: { color: "#00d4fe", width: 3, shadowBlur: 12, shadowColor: "rgba(0, 212, 254, .5)" },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: "rgba(39, 231, 243, .34)" },
-            { offset: 1, color: "rgba(39, 231, 243, .02)" }
+            { offset: 0, color: "rgba(0, 212, 254, .30)" },
+            { offset: 1, color: "rgba(0, 212, 254, .02)" }
           ])
         },
         itemStyle: {
-          color: "#f3df54",
+          color: "#ffc53d",
           borderColor: "#ffffff",
           borderWidth: 1,
           shadowBlur: 12,
-          shadowColor: "rgba(243, 223, 84, .38)"
+          shadowColor: "rgba(255, 197, 61, .38)"
         },
-        emphasis: { itemStyle: { shadowBlur: 18, shadowColor: "rgba(243, 223, 84, .35)" } }
+        emphasis: { itemStyle: { shadowBlur: 18, shadowColor: "rgba(255, 197, 61, .35)" } }
       }
     ]
   });
@@ -736,10 +781,9 @@ const renderBar = (stats) => {
   const chart = initChart(barChartRef);
   chart.setOption({
     ...chartTheme,
-    grid: { left: 58, right: 24, top: 22, bottom: 26 },
-    xAxis: { ...chartTheme.xAxis, type: "value" },
+    grid: { left: 58, right: 30, top: 22, bottom: 26 },
+    xAxis: { type: "value" },
     yAxis: {
-      ...chartTheme.yAxis,
       type: "category",
       data: top.map((row) => provinceNames[row.province] || row.province)
     },
@@ -751,14 +795,14 @@ const renderBar = (stats) => {
         itemStyle: {
           borderRadius: [0, 6, 6, 0],
           color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-            { offset: 0, color: "#0b4f78" },
-            { offset: 0.68, color: "#27e7f3" },
-            { offset: 1, color: "#f3df54" }
+            { offset: 0, color: "#0e4b8f" },
+            { offset: 0.72, color: "#00d4fe" },
+            { offset: 1, color: "#7df0ff" }
           ]),
           shadowBlur: 10,
-          shadowColor: "rgba(39, 231, 243, .28)"
+          shadowColor: "rgba(0, 212, 254, .28)"
         },
-        label: { show: true, position: "right", color: "#dffbff", fontSize: 11 }
+        label: { show: true, position: "right", color: "#dffbff", fontSize: 11, formatter: (p) => Number(p.value).toFixed(1) }
       }
     ]
   });
@@ -768,34 +812,22 @@ const renderDashboardSuitabilityPie = () => {
   const chart = initChart(suitabilityPieRef);
   chart.setOption({
     tooltip: {
-      ...chartTheme.tooltip,
       trigger: "item",
       formatter(params) {
         return `${params.name}<br/>站点数量：${formatNumber(params.value)} 座<br/>占比：${params.percent}%`;
       }
     },
-    legend: {
-      orient: "horizontal",
-      bottom: 0,
-      left: "center",
-      itemWidth: 10,
-      itemHeight: 10,
-      itemGap: 16,
-      textStyle: { color: "#c3d9df", fontSize: 11 }
-    },
     series: [
       {
         type: "pie",
-        radius: ["50%", "76%"],
-        center: ["50%", "45%"],
+        radius: ["58%", "80%"],
+        center: ["50%", "50%"],
         avoidLabelOverlap: false,
         label: { show: false },
         labelLine: { show: false },
         itemStyle: {
-          borderColor: "rgba(3, 20, 29, .95)",
-          borderWidth: 2,
-          shadowBlur: 10,
-          shadowColor: "rgba(39, 231, 243, .18)"
+          borderColor: "rgba(5, 13, 31, .9)",
+          borderWidth: 2
         },
         data: suitability.value.map((item) => ({
           name: item.name,
@@ -830,27 +862,27 @@ const renderResourceScatter = (stats, stations) => {
   const chart = initChart(scatterChartRef);
   chart.setOption({
     ...chartTheme,
-    grid: { left: 48, right: 26, top: 28, bottom: 34 },
+    grid: { left: 48, right: 42, top: 58, bottom: 38 },
     tooltip: {
-      ...chartTheme.tooltip,
+      trigger: "item",
       formatter(params) {
         const value = params.value;
-        return `${value[3]}<br/>平均 GHI：${value[0]}<br/>平均 PVPI：${value[1]}<br/>电站：${formatNumber(value[2])} 座<br/>面积：${value[4]} km2`;
+        return `${value[3]}<br/>平均 GHI：${value[0]}<br/>平均 PVPI：${value[1]}<br/>电站：${formatNumber(value[2])} 座<br/>面积：${value[4]} km²`;
       }
     },
-    xAxis: { ...chartTheme.xAxis, type: "value", name: "GHI" },
-    yAxis: { ...chartTheme.yAxis, type: "value", name: "PVPI" },
+    xAxis: { type: "value", name: "GHI", nameGap: 8, nameTextStyle: { color: "#8fb3d9" } },
+    yAxis: { type: "value", name: "PVPI", nameGap: 12, nameTextStyle: { color: "#8fb3d9", align: "left" } },
     series: [
       {
         type: "scatter",
         data,
         symbolSize: (value) => Math.max(8, Math.min(30, Math.sqrt(value[2]) * 1.2)),
         itemStyle: {
-          color: "rgba(39, 231, 243, .72)",
-          borderColor: "#f3df54",
+          color: "rgba(0, 212, 254, .72)",
+          borderColor: "#ffc53d",
           borderWidth: 1,
           shadowBlur: 12,
-          shadowColor: "rgba(39, 231, 243, .42)"
+          shadowColor: "rgba(0, 212, 254, .42)"
         }
       }
     ]
@@ -860,12 +892,11 @@ const renderResourceScatter = (stats, stations) => {
 const renderSuitabilityPie = () => {
   const chart = initChart(pieChartRef);
   chart.setOption({
-    tooltip: { ...chartTheme.tooltip, trigger: "item" },
+    tooltip: { trigger: "item" },
     legend: {
       bottom: 8,
       itemWidth: 10,
-      itemHeight: 10,
-      textStyle: { color: "#a8cbd2", fontSize: 11 }
+      itemHeight: 10
     },
     series: [
       {
@@ -873,8 +904,8 @@ const renderSuitabilityPie = () => {
         radius: ["48%", "72%"],
         center: ["50%", "46%"],
         avoidLabelOverlap: true,
-        label: { color: "#dffbff", formatter: "{b}\n{d}%" },
-        labelLine: { lineStyle: { color: "rgba(68, 231, 248, .45)" } },
+        label: { color: "#e6f4ff", formatter: "{b}\n{d}%" },
+        labelLine: { lineStyle: { color: "rgba(0, 212, 254, .45)" } },
         data: suitability.value.map((item) => ({
           name: item.name,
           value: Number(String(item.count).replace(/,/g, "")),
@@ -926,7 +957,6 @@ const renderProvinceKline = (stats, stations) => {
     ...chartTheme,
     grid: { left: 42, right: 18, top: 26, bottom: 36 },
     tooltip: {
-      ...chartTheme.tooltip,
       trigger: "axis",
       formatter(params) {
         const item = params[0];
@@ -934,17 +964,17 @@ const renderProvinceKline = (stats, stations) => {
         return `${item.name}<br/>Q1：${value[1]}<br/>Q3：${value[2]}<br/>最低：${value[3]}<br/>最高：${value[4]}`;
       }
     },
-    xAxis: { ...chartTheme.xAxis, type: "category", data: rows.map((row) => row.province) },
-    yAxis: { ...chartTheme.yAxis, type: "value", min: yMin, max: yMax },
+    xAxis: { type: "category", data: rows.map((row) => row.province) },
+    yAxis: { type: "value", min: yMin, max: yMax },
     series: [
       {
         type: "candlestick",
         data: rows.map((row) => row.candle),
         itemStyle: {
-          color: "rgba(39, 231, 243, .72)",
-          color0: "rgba(243, 223, 84, .72)",
-          borderColor: "#27e7f3",
-          borderColor0: "#f3df54"
+          color: "rgba(0, 212, 254, .72)",
+          color0: "rgba(255, 197, 61, .72)",
+          borderColor: "#00d4fe",
+          borderColor0: "#ffc53d"
         }
       }
     ]
@@ -967,15 +997,14 @@ const renderRadar = (stats, stations) => {
 
   const chart = initChart(radarChartRef);
   chart.setOption({
-    tooltip: chartTheme.tooltip,
     radar: {
       center: ["50%", "52%"],
       radius: "66%",
       splitNumber: 4,
-      axisName: { color: "#d5f7fb" },
-      splitLine: { lineStyle: { color: "rgba(68, 231, 248, .22)" } },
-      splitArea: { areaStyle: { color: ["rgba(39,231,243,.04)", "rgba(39,231,243,.1)"] } },
-      axisLine: { lineStyle: { color: "rgba(68, 231, 248, .28)" } },
+      axisName: { color: "#e6f4ff" },
+      splitLine: { lineStyle: { color: "rgba(0, 212, 254, .2)" } },
+      splitArea: { areaStyle: { color: ["rgba(0, 212, 254, .03)", "rgba(0, 212, 254, .08)"] } },
+      axisLine: { lineStyle: { color: "rgba(0, 212, 254, .25)" } },
       indicator: [
         { name: "辐照", max: 100 },
         { name: "密度", max: 100 },
@@ -990,14 +1019,14 @@ const renderRadar = (stats, stations) => {
         data: [{ value: values, name: "全国均值" }],
         symbol: "circle",
         symbolSize: 6,
-        lineStyle: { color: "#27e7f3", width: 2, shadowBlur: 12, shadowColor: "rgba(39, 231, 243, .5)" },
+        lineStyle: { color: "#00d4fe", width: 2, shadowBlur: 12, shadowColor: "rgba(0, 212, 254, .5)" },
         areaStyle: {
           color: new echarts.graphic.RadialGradient(0.5, 0.5, 0.8, [
-            { offset: 0, color: "rgba(243, 223, 84, .26)" },
-            { offset: 1, color: "rgba(39, 231, 243, .22)" }
+            { offset: 0, color: "rgba(0, 212, 254, .28)" },
+            { offset: 1, color: "rgba(0, 212, 254, .18)" }
           ])
         },
-        itemStyle: { color: "#f3df54", borderColor: "#fff", borderWidth: 1 }
+        itemStyle: { color: "#7df0ff", borderColor: "#fff", borderWidth: 1 }
       }
     ]
   });
@@ -1036,6 +1065,70 @@ const fetchFromApi = async (path, options = {}) => {
   }
   throw lastError || new Error("后端服务不可用");
 };
+
+/* 本次会话的选址勘察记录（内存态，最多保留 8 条） */
+const pushHistory = (lat, lon, result) => {
+  historyRecords.value.unshift({
+    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+    lat: Number(lat),
+    lon: Number(lon),
+    pvpi: Number(result.pvpi),
+    level: result.level,
+    color: result.level_color || "#00d4fe"
+  });
+  if (historyRecords.value.length > 8) historyRecords.value.pop();
+};
+
+const rerunFromHistory = (rec) => {
+  lastClickLatLng.value = { lat: rec.lat, lon: rec.lon };
+  fetchPrediction(rec.lat, rec.lon);
+};
+
+/* PVPI 仪表盘（实时预测口径 0~1，颜色随等级） */
+const renderRealtimeGauge = (result) => {
+  const el = realtimeGaugeRef.value;
+  if (!el) return;
+  if (!gaugeChart) gaugeChart = echarts.init(el, "bigscreen");
+  const levelColor = result.level_color || "#00d4fe";
+  gaugeChart.setOption({
+    series: [
+      {
+        type: "gauge",
+        startAngle: 210,
+        endAngle: -30,
+        min: 0,
+        max: 1,
+        radius: "96%",
+        center: ["50%", "56%"],
+        progress: { show: true, width: 12, roundCap: true, itemStyle: { color: levelColor, shadowBlur: 10, shadowColor: levelColor } },
+        axisLine: { roundCap: true, lineStyle: { width: 12, color: [[1, "rgba(143, 179, 217, .14)"]] } },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisLabel: { show: false },
+        pointer: { show: false },
+        anchor: { show: false },
+        title: { show: true, offsetCenter: [0, "40%"], fontSize: 11, color: "#8fb3d9" },
+        detail: {
+          valueAnimation: true,
+          fontSize: 30,
+          fontFamily: "Bahnschrift, Segoe UI, sans-serif",
+          fontWeight: 600,
+          color: "#fff",
+          offsetCenter: [0, "-4%"],
+          formatter: (value) => Number(value).toFixed(2)
+        },
+        data: [{ value: Number(result.pvpi), name: "PVPI" }]
+      }
+    ]
+  });
+};
+
+watch(realtimeResult, async (result) => {
+  if (result && activeTab.value === "realtime") {
+    await nextTick();
+    renderRealtimeGauge(result);
+  }
+});
 
 const fetchPrediction = async (lat, lon) => {
   // 竞态保护：连续点击时旧请求的结果直接丢弃
@@ -1089,6 +1182,7 @@ const fetchPrediction = async (lat, lon) => {
         }
         if (seq !== requestSeq) return;
         realtimeResult.value = result;
+        pushHistory(lat, lon, result);
         updateMapMarker(lat, lon, result.pvpi);
         return;
       } catch (error) {
@@ -1105,6 +1199,7 @@ const fetchPrediction = async (lat, lon) => {
     if (seq !== requestSeq) return;
     const fallback = buildLocalPrediction(lat, lon, lastError?.message || "后端服务不可用");
     realtimeResult.value = fallback;
+    pushHistory(lat, lon, fallback);
     updateMapMarker(lat, lon, fallback.pvpi);
 
   } catch (error) {
@@ -1171,6 +1266,7 @@ const updateMapMarker = (lat, lon, pvpi) => {
 
 const handleProvinceFocus = ({ province }) => {
   mouseCoords.value = null;
+  selectedProvince.value = province || "";
   if (province) {
     errorMessage.value = "";
   }
@@ -1195,6 +1291,10 @@ const handleRealtimeResize = () => {
 };
 
 watch(activeTab, async (newTab) => {
+  if (newTab !== "realtime" && gaugeChart) {
+    gaugeChart.dispose();
+    gaugeChart = null;
+  }
   if (newTab === "realtime") {
     await nextTick();
     if (!statsData.value.length || !stationData.value.length) {
@@ -1219,6 +1319,8 @@ onMounted(async () => {
     await loadData();
   } catch (error) {
     // dataLoadError 已在 loadData 内写入并展示，这里避免未处理的 Promise 拒绝
+  } finally {
+    booting.value = false;
   }
   window.addEventListener("resize", handleResize);
 });
@@ -1226,7 +1328,11 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.clearInterval(clockTimer);
   window.removeEventListener("resize", handleResize);
-  chartRefs().forEach((chart) => chart.dispose());
+  visibleCharts.value.forEach((chart) => chart.dispose());
+  if (gaugeChart) {
+    gaugeChart.dispose();
+    gaugeChart = null;
+  }
 });
 </script>
 

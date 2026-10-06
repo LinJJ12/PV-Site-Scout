@@ -28,7 +28,8 @@ const props = defineProps({
   provinceNames: { type: Object, default: () => ({}) },
   normalizeProvinceName: { type: Function, required: true },
   mode: { type: String, default: "dashboard" },
-  resultPoint: { type: Object, default: null }
+  resultPoint: { type: Object, default: null },
+  provincePvpi: { type: Object, default: () => ({}) }
 });
 
 const emit = defineEmits(["province-focus", "map-pick"]);
@@ -60,6 +61,8 @@ let cityGeoCache = new Map();
 let cityStatsByProvince = new Map();
 let focusedProvinceAdcode = null;
 let cityBoundaryFailed = false;
+let pillarMaterial = null;
+let flightMovers = [];
 
 const CHINA_CENTER = [104.2, 35.8];
 const LON_RANGE = { west: 73, east: 136, south: 17, north: 54 };
@@ -183,6 +186,8 @@ const clearSceneObjects = () => {
   labelItems = [];
   provinceMeshes = [];
   hoverMesh = null;
+  pillarMaterial = null;
+  flightMovers = [];
   hoverInfo.value = { visible: false, province: "", count: 0 };
 };
 
@@ -193,14 +198,33 @@ const getActiveCityCount = (feature) => {
   return Number(cityStats?.get(cityName) || 0);
 };
 
+/* choropleth 色带：省均 PVPI 低 → 高（与设计方案 §3.1 地图色带一致） */
+const PVPI_STOPS = [0x0a2b52, 0x0e4b8f, 0x0f79c7, 0x00d4fe, 0x7df0ff].map((hex) => new THREE.Color(hex));
+const NO_DATA_COLOR = new THREE.Color(0x0a2144);
+
+const pvpiDomain = computed(() => {
+  const values = Object.values(props.provincePvpi || {}).map(Number).filter(Number.isFinite);
+  if (!values.length) return { min: 0, max: 1 };
+  return { min: Math.min(...values), max: Math.max(...values) };
+});
+
+const colorForPvpi = (pvpi) => {
+  if (!Number.isFinite(Number(pvpi))) return NO_DATA_COLOR.clone();
+  const { min, max } = pvpiDomain.value;
+  const t = clamp((Number(pvpi) - min) / (max - min || 1), 0, 1);
+  const pos = t * (PVPI_STOPS.length - 1);
+  const index = Math.min(PVPI_STOPS.length - 2, Math.floor(pos));
+  return PVPI_STOPS[index].clone().lerp(PVPI_STOPS[index + 1], pos - index);
+};
+
 const getGeoBaseColor = (feature, tone = 0.45) => {
   const [lon, lat] = getFeatureCenter(feature);
   const west = clamp((108 - Number(lon || CHINA_CENTER[0])) / 34, 0, 1);
   const north = clamp((Number(lat || CHINA_CENTER[1]) - 40) / 13, 0, 1);
-  const base = new THREE.Color(0x0f6f76);
-  const deep = new THREE.Color(0x0a3e52);
-  const plateau = new THREE.Color(0x48706c);
-  const cold = new THREE.Color(0x315d6a);
+  const base = new THREE.Color(0x0e4f86);
+  const deep = new THREE.Color(0x0a2c52);
+  const plateau = new THREE.Color(0x3f6f8f);
+  const cold = new THREE.Color(0x2d5570);
   const color = base.clone()
     .lerp(deep, north * 0.28)
     .lerp(plateau, west * 0.32)
@@ -208,26 +232,31 @@ const getGeoBaseColor = (feature, tone = 0.45) => {
   return color.offsetHSL(0, 0.05, (tone - 0.45) * 0.09);
 };
 
-const createMaterials = (feature, tone = 0.45) => [
+const createMaterials = (feature, tone = 0.45) => {
+  // 全国视图按省均 PVPI choropleth 着色；省级/市级视图保留地形色变化
+  const useChoropleth = !focusedProvince.value && props.provincePvpi && Object.keys(props.provincePvpi).length;
+  const topColor = useChoropleth ? colorForPvpi(props.provincePvpi[normalizeFeatureName(feature)]) : getGeoBaseColor(feature, tone);
+  return [
+    new THREE.MeshStandardMaterial({
+      color: topColor,
+      emissive: new THREE.Color(0x07335c),
+      emissiveIntensity: 0.2,
+      roughness: 0.62,
+      metalness: 0.08,
+      transparent: true,
+      opacity: 0.98
+    }),
   new THREE.MeshStandardMaterial({
-    color: getGeoBaseColor(feature, tone),
-    emissive: new THREE.Color(0x083f49),
-    emissiveIntensity: 0.2,
-    roughness: 0.62,
-    metalness: 0.08,
-    transparent: true,
-    opacity: 0.98
-  }),
-  new THREE.MeshStandardMaterial({
-    color: 0x052c3a,
-    emissive: 0x073847,
+    color: 0x062038,
+    emissive: 0x072c4e,
     emissiveIntensity: 0.16,
     roughness: 0.68,
     metalness: 0.06,
     transparent: true,
     opacity: 0.92
   })
-];
+  ];
+};
 
 const simplifyRing = (ring) => {
   const step = profile.value.sampleStep;
@@ -344,9 +373,87 @@ const buildMap = (animated = true) => {
   // 在省级视图下总是显示电站光柱
   if (focusedProvince.value) {
     addFallbackStationPillars();
+  } else {
+    addNationalPillars();
+    addFlightLines();
   }
 
   fitCameraToMap(animated);
+};
+
+/* 全国视图：TOP 站点呼吸光柱（InstancedMesh 一次绘制，高度按 PVPI 映射） */
+const addNationalPillars = () => {
+  const ranked = props.stations
+    .filter((row) => Number.isFinite(Number(row.lon)) && Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.PVPI)))
+    .sort((a, b) => b.PVPI - a.PVPI)
+    .slice(0, 600);
+  if (!ranked.length) return;
+  const maxPvpi = Number(ranked[0].PVPI) || 1;
+  pillarMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false
+  });
+  const geometry = new THREE.CylinderGeometry(0.08, 0.16, 1, 8, 1, true);
+  const mesh = new THREE.InstancedMesh(geometry, pillarMaterial, ranked.length);
+  const dummy = new THREE.Object3D();
+  const lowColor = new THREE.Color(0x00d4fe);
+  const highColor = new THREE.Color(0x00ffa3);
+  const instanceColor = new THREE.Color();
+  ranked.forEach((row, index) => {
+    const base = lonLatToVector(row.lon, row.lat, FLAT_MAP_DEPTH + 0.02);
+    const height = 2.2 + (Number(row.PVPI) / maxPvpi) * 9;
+    dummy.position.set(base.x, base.y, base.z + height / 2);
+    dummy.rotation.set(Math.PI / 2, 0, 0);
+    dummy.scale.set(1, height, 1);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(index, dummy.matrix);
+    mesh.setColorAt(index, instanceColor.copy(lowColor).lerp(highColor, Number(row.PVPI) / maxPvpi));
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mapGroup.add(mesh);
+};
+
+/* 全国视图：PVPI TOP5 省域中心 → 全国最优站点的粒子飞线 */
+const addFlightLines = () => {
+  const entries = Object.entries(props.provincePvpi || {})
+    .map(([name, value]) => ({ name, value: Number(value) }))
+    .filter((row) => Number.isFinite(row.value))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+  const hub = props.stations
+    .filter((row) => Number.isFinite(Number(row.lon)) && Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.PVPI)))
+    .sort((a, b) => b.PVPI - a.PVPI)[0];
+  if (!entries.length || !hub) return;
+  const hubPos = lonLatToVector(hub.lon, hub.lat, FLAT_MAP_DEPTH + 0.4);
+
+  const featureByName = new Map();
+  for (const feature of props.geoJson?.features || []) {
+    featureByName.set(normalizeFeatureName(feature), feature);
+  }
+  for (const entry of entries) {
+    const feature = featureByName.get(entry.name);
+    if (!feature) continue;
+    const [lon, lat] = getFeatureCenter(feature);
+    const start = lonLatToVector(lon, lat, FLAT_MAP_DEPTH);
+    if (start.distanceTo(hubPos) < 8) continue;
+    const mid = start.clone().add(hubPos).multiplyScalar(0.5);
+    mid.z += start.distanceTo(hubPos) * 0.35;
+    const curve = new THREE.QuadraticBezierCurve3(start, mid, hubPos.clone());
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(curve.getPoints(60)),
+      new THREE.LineBasicMaterial({ color: 0x00ffa3, transparent: true, opacity: 0.45 })
+    );
+    mapGroup.add(line);
+    const mover = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0x7dffc0 })
+    );
+    mapGroup.add(mover);
+    flightMovers.push({ curve, mover, t: Math.random(), speed: 0.22 + Math.random() * 0.14 });
+  }
 };
 
 const loadCityFeatures = async (provinceFeature) => {
@@ -423,9 +530,11 @@ const addFallbackStationPillars = () => {
 
 const initScene = () => {
   const root = rootRef.value;
-  const { width, height } = root.getBoundingClientRect();
+  // 使用布局尺寸（clientWidth）而非 getBoundingClientRect，保证在 useFitScreen 缩放下渲染分辨率不受影响
+  const width = root.clientWidth || 1;
+  const height = root.clientHeight || 1;
   scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x161b1a, 130, 280);
+  scene.fog = new THREE.Fog(0x0a1730, 130, 280);
   camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 700);
   camera.up.set(0, 0, 1);
   camera.position.set(0, -92, 74);
@@ -456,11 +565,11 @@ const initScene = () => {
   pointer = new THREE.Vector2();
   clock = new THREE.Clock();
 
-  scene.add(new THREE.AmbientLight(0xd7f2df, 1.25));
-  const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
+  scene.add(new THREE.AmbientLight(0xcfe6ff, 1.0));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
   keyLight.position.set(22, -38, 78);
   scene.add(keyLight);
-  const rimLight = new THREE.PointLight(0xb7f2d0, 1.45, 160);
+  const rimLight = new THREE.PointLight(0x9fd4ff, 1.45, 160);
   rimLight.position.set(-42, 28, 48);
   scene.add(rimLight);
 
@@ -525,8 +634,9 @@ const handlePointerMove = (event) => {
   setHover(mesh);
   if (hoverLabelRef.value && mesh) {
     const rect = rootRef.value.getBoundingClientRect();
-    hoverLabelRef.value.style.left = `${event.clientX - rect.left + 14}px`;
-    hoverLabelRef.value.style.top = `${event.clientY - rect.top - 8}px`;
+    const scale = rect.width / (rootRef.value.clientWidth || 1) || 1;
+    hoverLabelRef.value.style.left = `${(event.clientX - rect.left) / scale + 14}px`;
+    hoverLabelRef.value.style.top = `${(event.clientY - rect.top) / scale - 8}px`;
   }
 };
 
@@ -706,7 +816,13 @@ const updateLabels = () => {
 
 const animate = () => {
   animationId = requestAnimationFrame(animate);
-  clock.getElapsedTime();
+  const delta = clock.getDelta();
+  const elapsed = clock.elapsedTime;
+  if (pillarMaterial) pillarMaterial.opacity = 0.4 + Math.sin(elapsed * 2.1) * 0.18;
+  for (const flight of flightMovers) {
+    flight.t = (flight.t + delta * flight.speed) % 1;
+    flight.mover.position.copy(flight.curve.getPoint(flight.t));
+  }
   if (controls) controls.update();
   if (labelItems.length) updateLabels();
   renderer.render(scene, camera);
@@ -714,7 +830,9 @@ const animate = () => {
 
 const handleResize = () => {
   if (!rootRef.value || !camera || !renderer) return;
-  const { width, height } = rootRef.value.getBoundingClientRect();
+  // 使用布局尺寸（clientWidth）：transform 缩放不改变布局尺寸，渲染分辨率保持稳定
+  const width = rootRef.value.clientWidth || 1;
+  const height = rootRef.value.clientHeight || 1;
   // 容器不可见（宽高为 0）时跳过，避免相机 aspect 变为 NaN
   if (width < 10 || height < 10) return;
   camera.aspect = width / height;
@@ -724,7 +842,7 @@ const handleResize = () => {
 };
 
 watch(
-  () => [props.geoJson, props.stats, props.stations, props.mode],
+  () => [props.geoJson, props.stats, props.stations, props.mode, props.provincePvpi],
   async () => {
     cityStatsByProvince.clear();
     await nextTick();

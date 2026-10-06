@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>光伏电站智能选址 · 新版大屏视觉稿</title>
+<script src="/node_modules/echarts/dist/echarts.min.js"></script>
+<style>
+  :root {
+    --bg-0: #050d1f;
+    --bg-1: #0a1730;
+    --panel: linear-gradient(160deg, rgba(13, 34, 64, 0.62), rgba(7, 19, 40, 0.5));
+    --panel-line: rgba(0, 212, 254, 0.22);
+    --panel-line-strong: rgba(0, 212, 254, 0.55);
+    --cyan: #00d4fe;
+    --cyan-soft: #7df0ff;
+    --green: #00ffa3;
+    --yellow: #ffc53d;
+    --red: #ff6b6b;
+    --text-1: #e6f4ff;
+    --text-2: #8fb3d9;
+    --text-3: #5a7ca6;
+    --num-font: "Bahnschrift", "DIN Alternate", "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(ellipse at 50% -10%, rgba(0, 116, 217, 0.28), transparent 55%),
+      radial-gradient(ellipse at 50% 118%, rgba(0, 212, 254, 0.10), transparent 52%),
+      linear-gradient(180deg, var(--bg-1), var(--bg-0) 62%, #04101f);
+    color: var(--text-1);
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  /* ---------- 1920x1080 等比缩放舞台 ---------- */
+  #stage {
+    position: absolute; left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    transform-origin: 0 0;
+    display: flex; flex-direction: column;
+    padding: 10px 14px 14px;
+    gap: 12px;
+  }
+  /* ---------- 背景：静态星点网格 + 单条扫描光带 ---------- */
+  .bg-grid {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(circle, rgba(0, 212, 254, 0.35) 1px, transparent 1.4px) 0 0 / 56px 56px,
+      linear-gradient(rgba(0, 212, 254, 0.05) 1px, transparent 1px) 0 0 / 100% 112px,
+      linear-gradient(90deg, rgba(0, 212, 254, 0.05) 1px, transparent 1px) 0 0 / 112px 100%;
+    mask-image: radial-gradient(ellipse at 50% 42%, rgba(0,0,0,.5), transparent 74%);
+  }
+  .scanline {
+    position: fixed; left: 0; right: 0; top: -30%; height: 34%;
+    pointer-events: none; z-index: 0;
+    background: linear-gradient(180deg, transparent, rgba(0, 212, 254, 0.05) 55%, rgba(0, 212, 254, 0.12) 82%, transparent);
+    animation: scan 9s linear infinite;
+  }
+  @keyframes scan { from { transform: translateY(-40vh); } to { transform: translateY(150vh); } }
+  .frame-corner { position: fixed; width: 26px; height: 26px; z-index: 3; pointer-events: none; opacity: 0.8; }
+  .frame-corner.tl { left: 8px; top: 8px; border-left: 2px solid var(--panel-line-strong); border-top: 2px solid var(--panel-line-strong); }
+  .frame-corner.tr { right: 8px; top: 8px; border-right: 2px solid var(--panel-line-strong); border-top: 2px solid var(--panel-line-strong); }
+  .frame-corner.bl { left: 8px; bottom: 8px; border-left: 2px solid var(--panel-line-strong); border-bottom: 2px solid var(--panel-line-strong); }
+  .frame-corner.br { right: 8px; bottom: 8px; border-right: 2px solid var(--panel-line-strong); border-bottom: 2px solid var(--panel-line-strong); }
+
+  /* ---------- 顶栏 ---------- */
+  header {
+    position: relative; z-index: 2;
+    height: 62px; flex: none;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark {
+    width: 34px; height: 34px; flex: none; position: relative;
+    background: conic-gradient(from 200deg, #00d4fe, #00ffa3, #00d4fe);
+    clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+    filter: drop-shadow(0 0 8px rgba(0, 212, 254, 0.55));
+  }
+  .brand-mark::after {
+    content: ""; position: absolute; inset: 7px;
+    background: var(--bg-0);
+    clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+  }
+  .brand h1 { font-size: 21px; letter-spacing: 3px; font-weight: 700; }
+  .brand small { display: block; font-family: var(--num-font); font-size: 10px; letter-spacing: 2.5px; color: var(--text-3); margin-top: 2px; }
+  .tabs { display: flex; gap: 6px; padding: 4px; border: 1px solid var(--panel-line); border-radius: 6px; background: rgba(5, 15, 33, 0.6); }
+  .tab {
+    padding: 7px 22px; font-size: 14px; letter-spacing: 2px; color: var(--text-2);
+    border: 1px solid transparent; border-radius: 4px; cursor: pointer; background: none; font-family: inherit;
+  }
+  .tab.active {
+    color: #fff; border-color: rgba(0, 212, 254, 0.55);
+    background: linear-gradient(180deg, rgba(0, 212, 254, 0.28), rgba(0, 212, 254, 0.06));
+    box-shadow: 0 0 12px rgba(0, 212, 254, 0.25), inset 0 0 10px rgba(0, 212, 254, 0.12);
+  }
+  .clock { justify-self: end; text-align: right; font-family: var(--num-font); font-variant-numeric: tabular-nums; }
+  .clock strong { display: block; font-size: 26px; font-weight: 600; letter-spacing: 1px; color: var(--cyan-soft); text-shadow: 0 0 14px rgba(0, 212, 254, 0.45); }
+  .clock span { font-size: 12px; color: var(--text-2); letter-spacing: 1px; }
+  header::after {
+    content: ""; position: absolute; left: 2%; right: 2%; bottom: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0, 212, 254, 0.75), transparent);
+  }
+
+  /* ---------- KPI 翻牌条 ---------- */
+  .kpi-strip {
+    position: relative; z-index: 2; flex: none; height: 96px;
+    display: grid; grid-template-columns: repeat(6, 1fr);
+    border: 1px solid var(--panel-line);
+    background: linear-gradient(180deg, rgba(13, 34, 64, 0.5), rgba(7, 19, 40, 0.35));
+  }
+  .kpi {
+    position: relative; display: flex; flex-direction: column; justify-content: center;
+    padding: 0 26px; gap: 4px;
+  }
+  .kpi + .kpi::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%; width: 1px; background: linear-gradient(180deg, transparent, rgba(0, 212, 254, 0.35), transparent); }
+  .kpi .label { font-size: 13px; color: var(--text-2); letter-spacing: 2px; display: flex; align-items: center; gap: 8px; }
+  .kpi .label i { width: 6px; height: 6px; background: var(--cyan); transform: rotate(45deg); box-shadow: 0 0 6px var(--cyan); }
+  .kpi .value { font-family: var(--num-font); font-variant-numeric: tabular-nums; font-size: 40px; font-weight: 600; line-height: 1; letter-spacing: 1px; color: #fff; text-shadow: 0 0 16px rgba(0, 212, 254, 0.35); }
+  .kpi .value small { font-size: 14px; font-weight: 400; color: var(--text-2); margin-left: 6px; letter-spacing: 0; }
+  .kpi.hero .value { color: var(--cyan-soft); }
+
+  /* ---------- 主体三栏 ---------- */
+  main { position: relative; z-index: 2; flex: 1; min-height: 0; display: grid; grid-template-columns: 400px 1fr 400px; gap: 12px; }
+  .col { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+  /* ---------- 统一面板 ---------- */
+  .panel {
+    position: relative; display: flex; flex-direction: column; min-height: 0;
+    border: 1px solid var(--panel-line);
+    background: var(--panel);
+    backdrop-filter: blur(4px);
+    padding: 12px 14px 12px;
+  }
+  .panel::before {
+    content: ""; position: absolute; inset: -1px; pointer-events: none;
+    --c: rgba(0, 240, 255, 0.9);
+    background:
+      linear-gradient(var(--c), var(--c)) left 0 top 0 / 14px 2px,
+      linear-gradient(var(--c), var(--c)) left 0 top 0 / 2px 14px,
+      linear-gradient(var(--c), var(--c)) right 0 top 0 / 14px 2px,
+      linear-gradient(var(--c), var(--c)) right 0 top 0 / 2px 14px,
+      linear-gradient(var(--c), var(--c)) left 0 bottom 0 / 14px 2px,
+      linear-gradient(var(--c), var(--c)) left 0 bottom 0 / 2px 14px,
+      linear-gradient(var(--c), var(--c)) right 0 bottom 0 / 14px 2px,
+      linear-gradient(var(--c), var(--c)) right 0 bottom 0 / 2px 14px;
+    background-repeat: no-repeat;
+    opacity: 0.85;
+  }
+  .panel > .p-title {
+    flex: none; display: flex; align-items: baseline; gap: 10px;
+    padding-bottom: 8px; margin-bottom: 8px;
+    border-bottom: 1px solid rgba(0, 212, 254, 0.14);
+  }
+  .panel > .p-title::before { content: ""; align-self: center; width: 4px; height: 15px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .panel > .p-title b { font-size: 15px; letter-spacing: 2px; font-weight: 700; }
+  .panel > .p-title em { font-style: normal; margin-left: auto; font-family: var(--num-font); font-size: 11px; color: var(--text-3); letter-spacing: 1px; }
+  .panel .p-body { flex: 1; min-height: 0; position: relative; }
+
+  /* ---------- 等级占比 ---------- */
+  #donutChart { position: absolute; inset: 0 0 34% 0; }
+  .donut-center { position: absolute; left: 0; top: 0; width: 100%; height: 66%; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+  .donut-center strong { font-family: var(--num-font); font-size: 30px; color: #fff; }
+  .donut-center span { font-size: 11px; color: var(--text-2); letter-spacing: 1px; }
+  .grade-rows { position: absolute; left: 0; right: 0; bottom: 0; height: 33%; display: grid; grid-template-rows: repeat(4, 1fr); align-items: center; }
+  .grade-row { display: grid; grid-template-columns: 10px 56px 1fr 52px 44px; align-items: center; gap: 8px; font-size: 12px; }
+  .grade-row i { width: 8px; height: 8px; transform: rotate(45deg); }
+  .grade-row .bar { height: 6px; background: rgba(0, 212, 254, 0.1); overflow: hidden; }
+  .grade-row .bar b { display: block; height: 100%; width: 0; transition: width 1.1s cubic-bezier(.2,.7,.3,1); }
+  .grade-row strong { font-family: var(--num-font); font-variant-numeric: tabular-nums; text-align: right; font-size: 14px; }
+  .grade-row span.pct { text-align: right; color: var(--text-3); font-family: var(--num-font); }
+
+  /* ---------- 省域梯队 ---------- */
+  .rank-rows { height: 100%; display: grid; grid-template-rows: repeat(8, 1fr); align-items: center; gap: 2px; }
+  .rank-row { display: grid; grid-template-columns: 24px 44px 1fr 56px; align-items: center; gap: 8px; font-size: 12px; }
+  .rank-row .no { font-family: var(--num-font); color: var(--text-3); font-size: 13px; }
+  .rank-row:nth-child(1) .no, .rank-row:nth-child(2) .no, .rank-row:nth-child(3) .no { color: var(--cyan); text-shadow: 0 0 8px rgba(0, 212, 254, 0.6); }
+  .rank-row .bar { height: 9px; background: rgba(0, 212, 254, 0.08); position: relative; overflow: hidden; }
+  .rank-row .bar b { position: absolute; inset: 0; width: 0; transition: width 1.2s cubic-bezier(.2,.7,.3,1); background: linear-gradient(90deg, rgba(14, 75, 143, 0.9), var(--cyan)); box-shadow: 0 0 10px rgba(0, 212, 254, 0.35); }
+  .rank-row:nth-child(1) .bar b { background: linear-gradient(90deg, rgba(0, 140, 100, 0.7), var(--green)); box-shadow: 0 0 10px rgba(0, 255, 163, 0.3); }
+  .rank-row strong { font-family: var(--num-font); font-variant-numeric: tabular-nums; font-size: 15px; text-align: right; color: var(--cyan-soft); }
+
+  /* ---------- 地图区 ---------- */
+  .map-wrap { position: relative; min-width: 0; }
+  .map-base-glow {
+    position: absolute; left: 50%; top: 56%; width: 78%; height: 64%;
+    transform: translate(-50%, -50%); pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(0, 120, 255, 0.16), rgba(0, 212, 254, 0.05) 45%, transparent 70%);
+  }
+  #mapChart { position: absolute; inset: 0; }
+  .map-chips { position: absolute; right: 10px; bottom: 8px; display: flex; gap: 10px; }
+  .chip {
+    display: flex; align-items: baseline; gap: 8px; padding: 8px 14px;
+    border: 1px solid var(--panel-line); background: rgba(7, 19, 40, 0.72); font-size: 12px; color: var(--text-2);
+  }
+  .chip strong { font-family: var(--num-font); font-variant-numeric: tabular-nums; font-size: 20px; color: var(--cyan-soft); }
+  .chip small { color: var(--text-3); }
+
+  /* ---------- 雷达 ---------- */
+  #radarChart { position: absolute; inset: 0; }
+
+  /* ---------- TOP10 滚动榜 ---------- */
+  .top10-head { display: grid; grid-template-columns: 34px 64px 1fr 64px 74px; gap: 6px; font-size: 11px; color: var(--text-3); padding: 2px 4px 6px; letter-spacing: 1px; }
+  .top10-viewport { flex: 1; min-height: 0; overflow: hidden; position: relative;
+    mask-image: linear-gradient(180deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%); }
+  .top10-list { position: absolute; left: 0; right: 0; top: 0; animation: roll 16s linear infinite; }
+  .top10-viewport:hover .top10-list { animation-play-state: paused; }
+  @keyframes roll { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+  .top10-row {
+    display: grid; grid-template-columns: 34px 64px 1fr 64px 74px; gap: 6px; align-items: center;
+    height: 40px; padding: 0 4px; font-size: 12.5px;
+  }
+  .top10-row:nth-child(odd) { background: rgba(0, 212, 254, 0.045); }
+  .top10-row .rk { font-family: var(--num-font); font-size: 15px; text-align: center; color: var(--text-2); position: relative; z-index: 0; }
+  .top10-row .rk.top { color: #07121f; font-weight: 700; }
+  .top10-row .rk.top::after { content: ""; position: absolute; inset: 3px 2px; z-index: -1; transform: rotate(45deg) scale(0.78); }
+  .top10-row .rk.r1::after { background: var(--yellow); box-shadow: 0 0 8px rgba(255, 197, 61, 0.6); }
+  .top10-row .rk.r2::after { background: #cfe3f5; }
+  .top10-row .rk.r3::after { background: #e8925a; }
+  .top10-row .pv { font-family: var(--num-font); font-variant-numeric: tabular-nums; font-size: 16px; text-align: right; }
+  .top10-row .num { font-family: var(--num-font); font-variant-numeric: tabular-nums; color: var(--text-2); }
+
+  /* ---------- 开场 Loading ---------- */
+  #loading {
+    position: fixed; inset: 0; z-index: 99; background: var(--bg-0);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+    transition: opacity 0.45s ease;
+  }
+  #loading.hide { opacity: 0; pointer-events: none; }
+  #loading .bar { width: 240px; height: 3px; background: rgba(0, 212, 254, 0.15); overflow: hidden; }
+  #loading .bar b { display: block; height: 100%; width: 40%; background: linear-gradient(90deg, transparent, var(--cyan)); animation: load 1.1s ease-in-out infinite alternate; }
+  @keyframes load { from { transform: translateX(-60%); } to { transform: translateX(220%); } }
+  #loading p { font-size: 13px; letter-spacing: 4px; color: var(--text-2); }
+</style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="scanline"></div>
+  <div class="frame-corner tl"></div><div class="frame-corner tr"></div>
+  <div class="frame-corner bl"></div><div class="frame-corner br"></div>
+
+  <div id="stage">
+    <header>
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div>
+          <h1>光伏电站智能选址数据可视化大屏</h1>
+          <small>PV SITE INTELLIGENCE · REAL DATA EDITION</small>
+        </div>
+      </div>
+      <nav class="tabs">
+        <button class="tab active">选址态势</button>
+        <button class="tab">资源收益评估</button>
+        <button class="tab">实时选址</button>
+      </nav>
+      <div class="clock"><strong id="clockTime">--:--:--</strong><span id="clockDate"></span></div>
+    </header>
+
+    <div class="kpi-strip" id="kpiStrip"></div>
+
+    <main>
+      <aside class="col">
+        <section class="panel" style="flex: 11;">
+          <div class="p-title"><b>各等级选址占比</b><em>SUITABILITY MIX</em></div>
+          <div class="p-body">
+            <div id="donutChart"></div>
+            <div class="donut-center"><strong id="donutTotal">--</strong><span>候选站点总数</span></div>
+            <div class="grade-rows" id="gradeRows"></div>
+          </div>
+        </section>
+        <section class="panel" style="flex: 9;">
+          <div class="p-title"><b>省域潜力梯队</b><em>TOP 8 · PVPI</em></div>
+          <div class="p-body"><div class="rank-rows" id="rankRows"></div></div>
+        </section>
+      </aside>
+
+      <section class="map-wrap">
+        <div class="map-base-glow"></div>
+        <div id="mapChart"></div>
+        <div class="map-chips">
+          <div class="chip"><span>PVPI 均值</span><strong id="chipAvg">--</strong></div>
+          <div class="chip"><span>最大辐照</span><strong id="chipGhi">--</strong><small>kWh/m²</small></div>
+        </div>
+      </section>
+
+      <aside class="col">
+        <section class="panel" style="flex: 8;">
+          <div class="p-title"><b>资源与风险画像</b><em>NATIONAL PROFILE</em></div>
+          <div class="p-body"><div id="radarChart"></div></div>
+        </section>
+        <section class="panel" style="flex: 12;">
+          <div class="p-title"><b>综合评分 TOP10 候选电站</b><em>MCDM RANKING</em></div>
+          <div class="top10-head"><span>排名</span><span>省份</span><span>可用面积 km²</span><span>GHI</span><span>PVPI</span></div>
+          <div class="top10-viewport"><div class="top10-list" id="top10List"></div></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div id="loading"><div class="bar"><b></b></div><p>正在接入真实选址数据</p></div>
+
+<script>
+/* ================= 等比缩放 ================= */
+const fit = () => {
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  const stage = document.getElementById("stage");
+  stage.style.transform = `scale(${s})`;
+  stage.style.left = (innerWidth - 1920 * s) / 2 + "px";
+  stage.style.top = (innerHeight - 1080 * s) / 2 + "px";
+};
+addEventListener("resize", fit); fit();
+
+/* ================= 时钟 ================= */
+const tickClock = () => {
+  const n = new Date();
+  document.getElementById("clockTime").textContent = n.toLocaleTimeString("zh-CN", { hour12: false });
+  document.getElementById("clockDate").textContent = n.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" });
+};
+tickClock(); setInterval(tickClock, 1000);
+
+/* ================= 工具 ================= */
+const fmt = (v, d = 0) => Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: d, maximumFractionDigits: d });
+const countUp = (el, target, digits = 0, dur = 1200) => {
+  const t0 = performance.now();
+  const step = (t) => {
+    const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = fmt(target * e, digits);
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+};
+const quantile = (arr, q) => {
+  const s = [...arr].sort((a, b) => a - b), pos = (s.length - 1) * q, base = Math.floor(pos);
+  return s[base + 1] === undefined ? s[base] : s[base] + (pos - base) * (s[base + 1] - s[base]);
+};
+const gradeColor = { 优选区: "#00ffa3", 适宜区: "#00d4fe", 备选区: "#ffc53d", 约束区: "#ff6b6b" };
+const gradeOf = (v, th) => v >= th[0] ? "优选区" : v >= th[1] ? "适宜区" : v >= th[2] ? "备选区" : "约束区";
+
+const PROVINCE_SHORT = (name) =>
+  String(name || "").replace(/维吾尔|壮族|回族/g, "").replace(/省|市|自治区|特别行政区/g, "");
+
+/* ================= 大屏 ECharts 主题 ================= */
+echarts.registerTheme("bigscreen", {
+  backgroundColor: "transparent",
+  textStyle: { color: "#8fb3d9", fontFamily: "Bahnschrift, Microsoft YaHei, sans-serif" },
+  color: ["#00d4fe", "#00ffa3", "#ffc53d", "#ff6b6b", "#7df0ff", "#1560bd"],
+});
+
+/* ================= 数据加载与渲染 ================= */
+(async () => {
+  const [geojson, stationsText] = await Promise.all([
+    fetch("/data/china_full.json").then((r) => r.json()),
+    fetch("/data/pv_stations_mcdm_scored.csv").then((r) => r.text()),
+  ]);
+
+  // 解析全量站点（province 保留字符串，其余转数值）
+  const [headerLine, ...lines] = stationsText.trim().split(/\r?\n/);
+  const headers = headerLine.split(",");
+  const stations = lines.map((l) => {
+    const cols = l.split(","), o = {};
+    headers.forEach((k, i) => (o[k] = k === "province" ? cols[i] : Number(cols[i])));
+    return o;
+  });
+  const pvpiAll = stations.map((s) => s.PVPI).filter(Number.isFinite);
+  // 与主程序同口径：按 PVPI 降序的 15% / 40% / 70% 分位（即升序 85% / 60% / 30%）
+  const th = [quantile(pvpiAll, 0.85), quantile(pvpiAll, 0.6), quantile(pvpiAll, 0.3)];
+
+  /* 省域汇总与 TOP400 站点：直接由全量 CSV 计算，无需预生成文件 */
+  const PROV_NAME = { anhui: "安徽", beijing: "北京", chongqing: "重庆", fujian: "福建", gansu: "甘肃", guangdong: "广东", guangxi: "广西", guizhou: "贵州", hainan: "海南", hebei: "河北", heilongjiang: "黑龙江", henan: "河南", hong_kong: "香港", hubei: "湖北", hunan: "湖南", Inner_Mongolia: "内蒙古", jiangsu: "江苏", jiangxi: "江西", jilin: "吉林", liaoning: "辽宁", macao: "澳门", ningxia: "宁夏", qinghai: "青海", shaanxi: "陕西", shandong: "山东", shanghai: "上海", shanxi: "山西", sichuan: "四川", taiwan: "台湾", tianjin: "天津", xinjiang: "新疆", xizang: "西藏", yunnan: "云南", zhejiang: "浙江" };
+  const stationGroups = new Map();
+  stations.forEach((s) => {
+    if (!stationGroups.has(s.province)) stationGroups.set(s.province, []);
+    stationGroups.get(s.province).push(s);
+  });
+  const summary = Object.keys(PROV_NAME)
+    .map((key) => {
+      const rows = stationGroups.get(key) || [];
+      if (!rows.length) return null;
+      const avg = (field) => rows.reduce((sum, row) => sum + Number(row[field]), 0) / rows.length;
+      return { p: PROV_NAME[key], count: rows.length, area: rows.reduce((sum, row) => sum + Number(row.area_km2), 0), pvpi: avg("PVPI"), ghi: avg("ghi_mean") };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.pvpi - a.pvpi);
+  const top400 = [...stations].sort((a, b) => b.PVPI - a.PVPI).slice(0, 400);
+
+  const avg = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+  const avgPvpi = avg(pvpiAll);
+  const maxGhi = Math.max(...stations.map((s) => s.ghi_mean));
+  const totalArea = summary.reduce((s, r) => s + r.area, 0);
+
+  /* ---- KPI 条 ---- */
+  const kpis = [
+    { label: "候选电站", value: stations.length, digits: 0, unit: "座", hero: true },
+    { label: "覆盖省域", value: summary.length, digits: 0, unit: "个" },
+    { label: "可用面积", value: totalArea, digits: 1, unit: "km²" },
+    { label: "平均 PVPI", value: avgPvpi, digits: 2, unit: "" },
+    { label: "最大辐照", value: maxGhi, digits: 2, unit: "kWh/m²" },
+    { label: "优选区占比", value: (pvpiAll.filter((v) => v >= th[0]).length / pvpiAll.length) * 100, digits: 1, unit: "%" },
+  ];
+  document.getElementById("kpiStrip").innerHTML = kpis
+    .map((k) => `<div class="kpi${k.hero ? " hero" : ""}"><span class="label"><i></i>${k.label}</span><span class="value"><b id="kpi-v">0</b><small>${k.unit}</small></span></div>`)
+    .join("");
+  document.querySelectorAll("#kpiStrip .value b").forEach((el, i) => countUp(el, kpis[i].value, kpis[i].digits));
+  document.getElementById("chipAvg").textContent = fmt(avgPvpi, 2);
+  document.getElementById("chipGhi").textContent = fmt(maxGhi, 2);
+
+  /* ---- 等级占比 ---- */
+  const gradeOrder = ["优选区", "适宜区", "备选区", "约束区"];
+  const gradeCount = Object.fromEntries(gradeOrder.map((g) => [g, 0]));
+  pvpiAll.forEach((v) => gradeCount[gradeOf(v, th)]++);
+  document.getElementById("donutTotal").textContent = fmt(stations.length);
+  document.getElementById("gradeRows").innerHTML = gradeOrder
+    .map((g) => {
+      const pct = (gradeCount[g] / pvpiAll.length) * 100;
+      return `<div class="grade-row"><i style="background:${gradeColor[g]};box-shadow:0 0 6px ${gradeColor[g]}"></i>
+        <span>${g}</span><span class="bar"><b data-w="${pct}" style="background:linear-gradient(90deg,transparent,${gradeColor[g]})"></b></span>
+        <strong>${fmt(gradeCount[g])}</strong><span class="pct">${pct.toFixed(1)}%</span></div>`;
+    })
+    .join("");
+  const donutChart = echarts.init(document.getElementById("donutChart"), "bigscreen");
+  donutChart.setOption({
+    tooltip: { trigger: "item", backgroundColor: "rgba(8,20,40,.92)", borderColor: "rgba(0,212,254,.4)", textStyle: { color: "#e6f4ff" },
+      formatter: (p) => `${p.name}<br/>站点：${fmt(p.value)} 座（${p.percent}%）` },
+    series: [{
+      type: "pie", radius: ["62%", "84%"], center: ["50%", "50%"],
+      label: { show: false }, labelLine: { show: false }, silent: false,
+      itemStyle: { borderColor: "rgba(5,13,31,.9)", borderWidth: 2 },
+      emphasis: { scaleSize: 6 },
+      data: gradeOrder.map((g) => ({ name: g, value: gradeCount[g], itemStyle: { color: gradeColor[g] } })),
+    }],
+  });
+
+  /* ---- 省域梯队 ---- */
+  const top8 = summary.slice(0, 8);
+  document.getElementById("rankRows").innerHTML = top8
+    .map((r, i) => `<div class="rank-row"><span class="no">${String(i + 1).padStart(2, "0")}</span><span>${r.p}</span>
+      <span class="bar"><b data-w="${(r.pvpi / top8[0].pvpi) * 100}"></b></span><strong>${r.pvpi.toFixed(1)}</strong></div>`)
+    .join("");
+
+  /* ---- 雷达（与现有 renderRadar 同口径） ---- */
+  const maxOf = (k) => Math.max(...stations.map((s) => s[k]));
+  const density = Math.min(1, stations.length / totalArea / 3);
+  const radarVals = [
+    avg(stations.map((s) => s.ghi_mean)) / maxOf("ghi_mean"),
+    density,
+    avgPvpi / maxOf("PVPI"),
+    1 - avg(stations.map((s) => s.precip_annual)) / maxOf("precip_annual"),
+    1 - avg(stations.map((s) => s.temp_std)) / maxOf("temp_std"),
+  ].map((v) => +(Math.max(0, Math.min(1, v)) * 100).toFixed(1));
+  const radarChart = echarts.init(document.getElementById("radarChart"), "bigscreen");
+  radarChart.setOption({
+    radar: {
+      center: ["50%", "52%"], radius: "68%", splitNumber: 4,
+      axisName: { color: "#e6f4ff", fontSize: 12 },
+      splitLine: { lineStyle: { color: "rgba(0,212,254,.2)" } },
+      splitArea: { areaStyle: { color: ["rgba(0,212,254,.03)", "rgba(0,212,254,.07)"] } },
+      axisLine: { lineStyle: { color: "rgba(0,212,254,.25)" } },
+      indicator: [{ name: "辐照", max: 100 }, { name: "密度", max: 100 }, { name: "PVPI", max: 100 }, { name: "少雨", max: 100 }, { name: "稳定", max: 100 }],
+    },
+    series: [{
+      type: "radar", symbol: "circle", symbolSize: 5,
+      data: [{ value: radarVals, name: "全国均值" }],
+      lineStyle: { color: "#00d4fe", width: 2, shadowBlur: 12, shadowColor: "rgba(0,212,254,.5)" },
+      areaStyle: { color: "rgba(0,212,254,.22)" },
+      itemStyle: { color: "#7df0ff", borderColor: "#fff", borderWidth: 1 },
+    }],
+  });
+
+  /* ---- TOP10 滚动榜 ---- */
+  const top10 = [...stations].sort((a, b) => b.PVPI - a.PVPI).slice(0, 10);
+  const rowHtml = (r, i) => {
+    const g = gradeOf(r.PVPI, th);
+    return `<div class="top10-row"><span class="rk ${i < 3 ? `top r${i + 1}` : ""}">${i + 1}</span><span>${PROV_NAME[r.province] || r.province}</span>
+      <span class="num">${fmt(r.area_km2, 2)}</span><span class="num">${fmt(r.ghi_mean, 2)}</span>
+      <span class="pv" style="color:${gradeColor[g]}">${r.PVPI.toFixed(2)}</span></div>`;
+  };
+  document.getElementById("top10List").innerHTML =
+    top10.map(rowHtml).join("") + top10.map(rowHtml).join(""); // 双份实现无缝滚动
+
+  /* ---- 中国地图 ---- */
+  echarts.registerMap("china", geojson);
+  // GeoJSON 内为全称（"北京市"），数据侧为简称（"北京"），建立简称→全称映射保证 choropleth 命中
+  const shortToFull = {};
+  (geojson.features || []).forEach((f) => {
+    const full = f.properties?.name;
+    if (full) shortToFull[PROVINCE_SHORT(full)] = full;
+  });
+  const mapData = summary.map((r) => ({ name: shortToFull[r.p] || r.p, value: r.pvpi, count: r.count, area: r.area, short: r.p }));
+  const scatterData = top400.map((s) => ({ name: `${PROV_NAME[s.province] || s.province}·站点`, value: [Number(s.lon), Number(s.lat), Number(s.PVPI)] }));
+  const hub = scatterData[0]?.value;
+  const FLY_FROM = { 新疆: [85.6, 41.2], 西藏: [88.4, 31.1], 青海: [96.0, 35.7], 甘肃: [99.5, 38.5], 内蒙古: [113.5, 43.5] };
+  const lineData = hub ? Object.entries(FLY_FROM).map(([p, c]) => ({ coords: [c, [hub[0], hub[1]]] })) : [];
+
+  const mapChart = echarts.init(document.getElementById("mapChart"), "bigscreen");
+  mapChart.setOption({
+    tooltip: {
+      backgroundColor: "rgba(8,20,40,.92)", borderColor: "rgba(0,212,254,.4)", borderWidth: 1,
+      textStyle: { color: "#e6f4ff", fontSize: 12 },
+      extraCssText: "backdrop-filter: blur(6px); box-shadow: 0 4px 24px rgba(0,0,0,.5);",
+      formatter: (p) => p.seriesType === "map"
+        ? `<b>${p.data?.short || p.name}</b><br/>省均 PVPI：${Number(p.value).toFixed(2)}<br/>候选站点：${fmt(p.data?.count ?? 0)} 座<br/>可用面积：${fmt(p.data?.area ?? 0, 1)} km²`
+        : `${p.name}<br/>站点 PVPI：${p.value[2].toFixed(1)}`,
+    },
+    visualMap: {
+      type: "continuous", min: 9, max: 58, seriesIndex: 0,
+      left: 12, bottom: 10, orient: "horizontal", itemWidth: 12, itemHeight: 90,
+      text: ["高潜力", "低"], calculable: false,
+      textStyle: { color: "#8fb3d9", fontSize: 11 },
+      inRange: { color: ["#0a2b52", "#0e4b8f", "#0f79c7", "#00d4fe", "#7df0ff"] },
+    },
+    geo: {
+      map: "china", roam: false,
+      layoutCenter: ["50%", "53%"], layoutSize: "92%",
+      itemStyle: {
+        areaColor: "#0a2144", borderColor: "rgba(125,240,255,.5)", borderWidth: 1,
+        shadowColor: "rgba(0,120,255,.45)", shadowBlur: 26, shadowOffsetY: 10,
+      },
+      emphasis: { label: { show: true, color: "#fff", fontSize: 12 }, itemStyle: { areaColor: "#00d4fe", shadowBlur: 18 } },
+      select: { disabled: true },
+    },
+    series: [
+      { type: "map", map: "china", geoIndex: 0, data: mapData },
+      {
+        type: "scatter", coordinateSystem: "geo", zlevel: 2,
+        symbolSize: (v) => 3 + Math.min(6, v[2] / 14),
+        itemStyle: { color: "rgba(125,240,255,.7)", shadowBlur: 6, shadowColor: "rgba(125,240,255,.65)" },
+        data: scatterData,
+      },
+      {
+        type: "effectScatter", coordinateSystem: "geo", zlevel: 3,
+        rippleEffect: { brushType: "stroke", scale: 3, period: 3.5 },
+        symbolSize: (v) => 6 + Math.min(8, v[2] / 9),
+        itemStyle: { color: "#7df0ff", shadowBlur: 10, shadowColor: "rgba(125,240,255,.9)" },
+        data: scatterData.slice(0, 20),
+      },
+      {
+        type: "lines", coordinateSystem: "geo", zlevel: 4,
+        effect: { show: true, period: 4, trailLength: 0.65, symbol: "arrow", symbolSize: 7, color: "#00ffa3" },
+        lineStyle: { color: "rgba(0,255,163,.55)", width: 1.6, curveness: 0.28 },
+        data: lineData,
+      },
+    ],
+  });
+
+  /* ---- 入场动画 ---- */
+  requestAnimationFrame(() => {
+    document.querySelectorAll("[data-w]").forEach((el, i) => {
+      setTimeout(() => (el.style.width = el.dataset.w + "%"), 150 + i * 70);
+    });
+  });
+
+  document.getElementById("loading").classList.add("hide");
+
+  addEventListener("resize", () => [donutChart, radarChart, mapChart].forEach((c) => c.resize()));
+})();
+</script>
+</body>
+</html>
