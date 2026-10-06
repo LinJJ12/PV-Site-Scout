@@ -3,7 +3,7 @@
     <div class="scanline"></div>
     <div class="frame-corner tl"></div><div class="frame-corner tr"></div>
     <div class="frame-corner bl"></div><div class="frame-corner br"></div>
-    <transition name="boot-fade">
+    <transition name="boot-fade" :duration="450">
       <div class="boot-loading" v-if="booting">
         <div class="boot-mark"></div>
         <div class="boot-bar"><b></b></div>

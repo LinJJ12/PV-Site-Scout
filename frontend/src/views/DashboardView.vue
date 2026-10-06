@@ -37,6 +37,12 @@
           mode="dashboard"
           @province-focus="handleProvinceFocus"
         />
+        <div class="map-legend" v-if="legendRange">
+          <span class="legend-label">省均 PVPI</span>
+          <span class="legend-bar"></span>
+          <span class="legend-value">{{ legendRange.min }}</span>
+          <span class="legend-value end">{{ legendRange.max }}</span>
+        </div>
         <div class="map-chips">
           <div class="chip"><span>PVPI 均值</span><strong>{{ summary.avgPvpi }}</strong></div>
           <div class="chip"><span>最大辐照</span><strong>{{ summary.maxGhi }}</strong><small>kWh/m²</small></div>
@@ -72,7 +78,7 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import * as echarts from "echarts/core";
 
 import ThreeChinaMap from "@/components/ThreeChinaMap.vue";
@@ -193,6 +199,13 @@ const renderRadar = (stats, stations) => {
 const handleProvinceFocus = ({ province }) => {
   setSelectedProvince(province);
 };
+
+/* choropleth 色标范围（与 ThreeChinaMap 的 PVPI_STOPS 色带一致） */
+const legendRange = computed(() => {
+  const values = Object.values(provincePvpiMap.value).map(Number).filter(Number.isFinite);
+  if (!values.length) return null;
+  return { min: Math.min(...values), max: Math.max(...values) };
+});
 
 onMounted(() => {
   if (solar.loaded.value) nextTick(renderDashboardCharts);

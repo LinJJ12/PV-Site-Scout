@@ -1,11 +1,11 @@
 <template>
-  <div class="board-head">
+  <div class="board-head" :style="{ gridTemplateColumns: gridTemplate }">
     <span v-for="col in columns" :key="col.key" :style="{ textAlign: col.align || 'left' }">{{ col.label }}</span>
   </div>
   <div class="board-viewport">
     <div class="board-empty" v-if="!rows.length">该省暂无站点进入榜单</div>
     <div class="board-list" v-else>
-      <div class="board-row" v-for="(row, index) in doubledRows" :key="index">
+      <div class="board-row" v-for="(row, index) in doubledRows" :key="index" :style="{ gridTemplateColumns: gridTemplate }">
         <span class="rk" :class="rankClass(row.rank)">{{ row.rank }}</span>
         <span v-for="col in bodyColumns" :key="col.key" :style="{ textAlign: col.align || 'left' }">
           <b v-if="col.colorKey && row[col.colorKey]" :style="{ color: row[col.colorKey] }">{{ row[col.key] }}</b>
@@ -23,6 +23,7 @@ import { computed } from "vue";
 const props = defineProps({
   columns: { type: Array, default: () => [] },      // [{ key, label, align, colorKey? }]
   rows: { type: Array, default: () => [] },          // 每行含 columns 的 key 字段
+  gridTemplate: { type: String, default: "34px 64px 1fr 64px 74px" } // 列宽模板（含 rank 列）
 });
 
 const bodyColumns = computed(() => props.columns.filter((col) => col.key !== "rank"));

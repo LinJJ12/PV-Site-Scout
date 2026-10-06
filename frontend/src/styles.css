@@ -688,6 +688,39 @@ button {
   z-index: 4;
 }
 
+/* choropleth 色标（与地图 PVPI_STOPS 色带一致） */
+.map-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--panel-line);
+  background: rgba(7, 19, 40, 0.72);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.map-legend .legend-bar {
+  width: 140px;
+  height: 8px;
+  background: linear-gradient(90deg, #0a2b52, #0e4b8f, #0f79c7, #00d4fe, #7df0ff);
+  border: 1px solid rgba(0, 212, 254, 0.25);
+}
+
+.map-legend .legend-value {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  color: var(--cyan-soft);
+}
+
+.map-legend .legend-value.end {
+  color: #7df0ff;
+}
+
 .chip {
   display: flex;
   align-items: baseline;
@@ -802,14 +835,14 @@ button {
   color: var(--cyan-soft);
 }
 
-/* ---------- 资源收益评估（3×2 图表矩阵） ---------- */
+/* ---------- 资源收益评估（分析型联动布局：主散点 + 详情卡 + 图表组） ---------- */
 .resource-profit-dashboard {
   position: relative;
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(2, 1fr);
+  grid-template-columns: 1fr 1fr 400px;
+  grid-template-rows: 1.35fr 1fr 0.95fr;
   gap: 12px;
   z-index: 2;
 }
@@ -821,6 +854,135 @@ button {
 .resource-profit-dashboard .chart {
   position: absolute;
   inset: 0;
+}
+
+.resource-profit-dashboard .scatter-panel {
+  grid-column: 1 / 3;
+  grid-row: 1;
+}
+
+.resource-profit-dashboard .link-detail-panel {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.resource-profit-dashboard .bar-panel {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.resource-profit-dashboard .pie-panel {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.resource-profit-dashboard .scroll-board-panel {
+  grid-column: 3;
+  grid-row: 2 / 4;
+}
+
+.resource-profit-dashboard .kline-panel {
+  grid-column: 1 / 3;
+  grid-row: 3;
+}
+
+/* 联动详情卡 */
+/* 联动详情卡（正常文档流，避免盖住标题栏拦截点击） */
+.link-detail-panel .panel-body {
+  padding: 2px 2px 4px;
+}
+
+.link-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-head strong {
+  font-size: 20px;
+  letter-spacing: 2px;
+  color: #fff;
+}
+
+.detail-badge {
+  padding: 3px 10px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #052018;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+
+.detail-badge.neutral {
+  color: var(--cyan-soft);
+  background: rgba(0, 212, 254, 0.16);
+  border: 1px solid rgba(0, 212, 254, 0.45);
+}
+
+.detail-rows {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  min-height: 0;
+}
+
+.detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 212, 254, 0.14);
+  background: rgba(0, 212, 254, 0.05);
+}
+
+.detail-row span {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-2);
+  letter-spacing: 1px;
+}
+
+.detail-row strong {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  color: #e6f4ff;
+}
+
+.detail-row i {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.detail-hint {
+  margin: 0;
+  font-size: 11.5px;
+  letter-spacing: 1px;
+  color: var(--text-3);
+}
+
+.detail-reset {
+  margin-left: auto;
+  padding: 3px 12px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--cyan-soft);
+  border: 1px solid rgba(0, 212, 254, 0.45);
+  background: rgba(7, 19, 40, 0.8);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.detail-reset:hover {
+  background: rgba(0, 212, 254, 0.15);
 }
 
 .scrollable-panel {
@@ -1348,7 +1510,10 @@ button {
 }
 
 .boot-fade-leave-active {
+  /* duration 由 <transition :duration> 显式控制，不依赖 transitionend；
+     离场期间禁止命中，避免过渡被冻结时遮罩拦截全页点击 */
   transition: opacity 0.45s ease;
+  pointer-events: none;
 }
 
 .boot-fade-leave-to {

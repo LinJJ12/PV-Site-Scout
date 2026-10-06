@@ -60,6 +60,7 @@ let didDrag = false;
 let cityGeoCache = new Map();
 let pillarMaterial = null;
 let flightMovers = [];
+let resultMarker = null;
 
 const CHINA_CENTER = [104.2, 35.8];
 const LON_RANGE = { west: 73, east: 136, south: 17, north: 54 };
@@ -185,7 +186,42 @@ const clearSceneObjects = () => {
   hoverMesh = null;
   pillarMaterial = null;
   flightMovers = [];
+  resultMarker = null;
   hoverInfo.value = { visible: false, province: "", count: 0 };
+};
+
+/* 实时选址：在点击位置放置定位点 + 扩散脉冲环（props.resultPoint）。
+   重复调用时先销毁旧标记的几何体/材质，避免 GPU 资源泄露 */
+const placeResultMarker = () => {
+  if (resultMarker) {
+    resultMarker.group.parent?.remove(resultMarker.group);
+    resultMarker.dot.geometry.dispose();
+    resultMarker.dot.material.dispose();
+    resultMarker.ring.geometry.dispose();
+    resultMarker.ring.material.dispose();
+    resultMarker = null;
+  }
+  const point = props.resultPoint;
+  if (!point || !projection || !mapGroup) return;
+  const lat = Number(point.lat);
+  const lon = Number(point.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  const base = lonLatToVector(lon, lat, FLAT_MAP_DEPTH + 0.06);
+  const color = 0x00ffa3;
+  const dot = new THREE.Mesh(
+    new THREE.CircleGeometry(0.32, 24),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false })
+  );
+  dot.position.set(base.x, base.y, base.z);
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 0.62, 40),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide })
+  );
+  ring.position.set(base.x, base.y, base.z + 0.02);
+  const group = new THREE.Group();
+  group.add(dot, ring);
+  mapGroup.add(group);
+  resultMarker = { group, dot, ring };
 };
 
 /* choropleth 色带：省均 PVPI 低 → 高（与设计方案 §3.1 地图色带一致） */
@@ -368,6 +404,7 @@ const buildMap = (animated = true) => {
     addFlightLines();
   }
 
+  placeResultMarker();
   fitCameraToMap(animated);
 };
 
@@ -781,6 +818,12 @@ const animate = () => {
   const delta = clock.getDelta();
   const elapsed = clock.elapsedTime;
   if (pillarMaterial) pillarMaterial.opacity = 0.4 + Math.sin(elapsed * 2.1) * 0.18;
+  if (resultMarker) {
+    // 定位脉冲环：1.8s 一轮由内向外扩散并淡出
+    const t = (elapsed % 1.8) / 1.8;
+    resultMarker.ring.scale.setScalar(1 + t * 2.6);
+    resultMarker.ring.material.opacity = 0.85 * (1 - t);
+  }
   for (const flight of flightMovers) {
     flight.t = (flight.t + delta * flight.speed) % 1;
     flight.mover.position.copy(flight.curve.getPoint(flight.t));
@@ -810,6 +853,13 @@ watch(
     if (scene && props.geoJson) buildMap(false);
   },
   { deep: false }
+);
+
+watch(
+  () => props.resultPoint,
+  () => {
+    if (scene && mapGroup) placeResultMarker();
+  }
 );
 
 onMounted(() => {
