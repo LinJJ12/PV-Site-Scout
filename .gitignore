@@ -54,14 +54,13 @@ vite-dev.err
 vite-dev.err.log
 
 # ---------- 大文件 / 运行时数据（开源仓默认不收录） ----------
-# 后端原始与处理数据、模型权重、日志
+# 后端原始与处理数据（cpvpd 数据集 / 抓取输出 / 评分站点）、模型权重、日志
 backend/data/
 backend/resource/
 backend/models/
 
-# 根目录下的研究用训练产物与数据抓取输出（保留在本地，不入库）
-/models/
-/solar_data_output/
+# 研究用训练产物（notebook / 训练脚本 / 中间权重，保留在本地，不入库）
+/backend/training/
 
 # 机器学习与序列化产物
 *.pkl

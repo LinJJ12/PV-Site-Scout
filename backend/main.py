@@ -3,8 +3,7 @@
 用法（在 backend/ 目录）：
   python main.py                 # 默认启动完整模型 API（GBDT 运行包优先）
   python main.py --mode full     # GAT+GBDT（仅在缺少运行包时才走 GAT，需 torch）
-  python main.py --mode simple   # 简化公式（独立 app）
-  python main.py --mode base     # 基础 API（api/app.py）
+  python main.py --mode base     # 基础 API（api/app.py，简化公式，无模型依赖）
 
 环境变量：
   PV_RATE_LIMIT_PER_MIN        /api/predict 每 IP 限流（默认 60，<=0 关闭）
@@ -27,9 +26,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="PV site prediction API server")
     parser.add_argument(
         "--mode",
-        choices=("full", "simple", "base"),
+        choices=("full", "base"),
         default="full",
-        help="API 模式：full=完整模型（GBDT 优先），simple/base=简化公式",
+        help="API 模式：full=完整模型（GBDT 优先），base=基础 API（简化公式）",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
@@ -42,8 +41,6 @@ def main() -> None:
 
     if args.mode == "full":
         from src.api.app_full import app
-    elif args.mode == "simple":
-        from src.api.app_simple import app
     else:
         from src.api.app import app
 

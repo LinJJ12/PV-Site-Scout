@@ -201,6 +201,10 @@ KPI 从左栏提升为**横贯顶部的翻牌条**——这是大屏区别于报
 
 **栈不变**：Vue3 + Vite + ECharts + Three.js + GSAP。不引入图表库/组件库——现有栈能力已覆盖全部需求，引入 DataV 组件库反而会带来第二套图表体系与风格冲突；只借鉴其边框装饰与飞线的实现样式手写。
 
+**前后端职责边界（2026-10-06 收敛）**：NASA POWER 已确认支持 CORS（`access-control-allow-origin: *`），因此**简化公式模式完全运行在 Vue 端**（`src/api/nasa.js` 直连取数 + `utils/pvpi.js` 本地计算，含 0.5° 网格缓存与重试，与后端同口径）；Python 后端只保留必须由它完成的事——GAT/GBDT 模型推理（`app_simple.py` 已删除，`main.py` 模式收敛为 full/base）。仓库代码构成 Vue/JS ≈ 2900 行 > Python ≈ 2370 行。
+
+**目录规范（同步整理）**：仓库根只留 `LICENSE / README.md / backend / docs / frontend`；训练产物（notebook、训练脚本、中间权重）统一在 `backend/training/`（gitignored）；CPVPD 形状数据集归位 `backend/data/cpvpd/`；抓取断点产物归位 `backend/data/fetch/`（`fetch_all_solar_data.py` 默认输出改用 `paths.DATA_FETCH`）。
+
 **目录规划**（App.vue 从 1196 行拆分）：
 
 ```

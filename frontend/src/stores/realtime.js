@@ -4,6 +4,7 @@
 import { computed, ref } from "vue";
 
 import { fetchFromApi, modelLabel } from "@/api/client";
+import { fetchNasaSolar } from "@/api/nasa";
 import { useSolarDataStore } from "@/stores/solarData";
 import { calculateSimplePvpi, classifyPvpi } from "@/utils/pvpi";
 import { provinceNames } from "@/utils/provinces";
@@ -84,6 +85,29 @@ const buildLocalPrediction = (lat, lon, reason = "") => {
   };
 };
 
+/* 简化公式（纯前端）：直连 NASA POWER 取数 → 本地公式计算，不经过后端。
+   NASA 不可用时回退到最近真实站点数据兜底。 */
+const predictSimpleLocally = async (lat, lon, signal) => {
+  const solarData = await fetchNasaSolar(lat, lon, { signal });
+  const pvpi = calculateSimplePvpi(solarData);
+  return {
+    lat,
+    lon,
+    pvpi,
+    pvssi: pvpi,
+    ...classifyPvpi(pvpi),
+    model_type: "简化公式",
+    solar_data: {
+      ghi_annual_mean: Number(solarData.ghi_annual_mean.toFixed(2)),
+      ghi_annual_std: Number(solarData.ghi_annual_std.toFixed(2)),
+      temp_annual_mean: Number(solarData.temp_annual_mean.toFixed(2)),
+      temp_annual_std: Number(solarData.temp_annual_std.toFixed(2)),
+      precip_annual_mean: Number(Math.max(0, solarData.precip_annual_mean).toFixed(2)),
+      source: solarData.source
+    }
+  };
+};
+
 /* 本次会话的选址勘察记录（内存态，最多保留 8 条） */
 const pushHistory = (lat, lon, result) => {
   historyRecords.value.unshift({
@@ -118,14 +142,30 @@ const fetchPrediction = async (lat, lon) => {
   const bases = [window.location.origin, "http://127.0.0.1:5000", "http://localhost:5000"].filter(Boolean);
 
   try {
-    const mode = useFullModel.value ? "full" : "simple";
+    /* 简化公式：纯前端直连 NASA POWER，后端只服务完整模型推理 */
+    if (!useFullModel.value) {
+      try {
+        const result = await predictSimpleLocally(lat, lon, makeSignal());
+        if (seq !== requestSeq) return;
+        realtimeResult.value = result;
+        pushHistory(lat, lon, result);
+      } catch (error) {
+        if (controller.signal.aborted || seq !== requestSeq) return;
+        if (error.name === "AbortError") return;
+        const fallback = buildLocalPrediction(lat, lon, error.message || "NASA POWER 不可用");
+        realtimeResult.value = fallback;
+        pushHistory(lat, lon, fallback);
+      }
+      return;
+    }
+
     let lastError = null;
 
     for (const base of bases) {
       if (controller.signal.aborted) return;
       try {
         const response = await fetch(
-          `${base}/api/predict?lat=${lat}&lon=${lon}&mode=${mode}`,
+          `${base}/api/predict?lat=${lat}&lon=${lon}&mode=full`,
           { signal: makeSignal() }
         );
         let result = null;
@@ -138,16 +178,14 @@ const fetchPrediction = async (lat, lon) => {
           throw new Error(result?.error || (result ? `接口响应异常：${response.status}` : "无法解析响应数据"));
         }
         const source = String(result?.solar_data?.source || "");
-        if (useFullModel.value) {
-          if (!source.includes("NASA")) {
-            throw new Error("未获取到 NASA 气候数据，请检查网络后重试");
-          }
-          if (result.inference_version !== INFERENCE_VERSION) {
-            throw new Error("后端推理版本过旧，请重启 backend（uv run python main.py）后重试");
-          }
-          if (Number(result.pvpi) >= 0.999) {
-            throw new Error("PVPI 结果异常（恒为 1.00），请确认已启动最新版 backend");
-          }
+        if (!source.includes("NASA")) {
+          throw new Error("未获取到 NASA 气候数据，请检查网络后重试");
+        }
+        if (result.inference_version !== INFERENCE_VERSION) {
+          throw new Error("后端推理版本过旧，请重启 backend（uv run python main.py）后重试");
+        }
+        if (Number(result.pvpi) >= 0.999) {
+          throw new Error("PVPI 结果异常（恒为 1.00），请确认已启动最新版 backend");
         }
         if (seq !== requestSeq) return;
         realtimeResult.value = result;
@@ -159,15 +197,8 @@ const fetchPrediction = async (lat, lon) => {
       }
     }
 
-    if (useFullModel.value) {
-      if (seq !== requestSeq) return;
-      throw lastError || new Error("完整模型后端不可用，请确认已启动：cd backend && uv run python main.py");
-    }
-
     if (seq !== requestSeq) return;
-    const fallback = buildLocalPrediction(lat, lon, lastError?.message || "后端服务不可用");
-    realtimeResult.value = fallback;
-    pushHistory(lat, lon, fallback);
+    throw lastError || new Error("完整模型后端不可用，请确认已启动：cd backend && uv run python main.py");
   } catch (error) {
     if (seq === requestSeq) {
       errorMessage.value = error.message || "获取真实数据失败";
@@ -182,24 +213,30 @@ const fetchPrediction = async (lat, lon) => {
 const toggleModel = async (mode) => {
   errorMessage.value = "";
   modelChoiceTouched.value = true;
-  try {
-    const response = await fetchFromApi("/api/toggle_mode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode })
-    });
-    const result = await response.json();
-    if (result.success) {
-      useFullModel.value = mode === "full";
-      if (typeof result.torch_available === "boolean") {
-        torchAvailable.value = result.torch_available;
+  if (mode !== "full") {
+    /* 简化公式纯前端运行，无需后端参与 */
+    useFullModel.value = false;
+    modelStatusText.value = "简化公式";
+  } else {
+    try {
+      const response = await fetchFromApi("/api/toggle_mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode })
+      });
+      const result = await response.json();
+      if (result.success) {
+        useFullModel.value = true;
+        if (typeof result.torch_available === "boolean") {
+          torchAvailable.value = result.torch_available;
+        }
+        modelStatusText.value = result.model_type || modelLabel(true, torchAvailable.value);
       }
-      modelStatusText.value = result.model_type || modelLabel(useFullModel.value, torchAvailable.value);
+    } catch {
+      // 后端不可达时仍按用户选择切换展示，预测时会给出明确错误
+      useFullModel.value = true;
+      modelStatusText.value = modelLabel(true, torchAvailable.value);
     }
-  } catch {
-    // 后端不可达时仍按用户选择切换展示，预测时会给出明确错误
-    useFullModel.value = mode === "full";
-    modelStatusText.value = modelLabel(useFullModel.value, torchAvailable.value);
   }
   if (lastClickLatLng.value) {
     fetchPrediction(lastClickLatLng.value.lat, lastClickLatLng.value.lon);

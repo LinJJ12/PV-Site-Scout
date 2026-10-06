@@ -13,27 +13,27 @@ import pickle
 import time
 from datetime import datetime
 from src.lib.solar_data import SolarRadiationAPI
-from src.lib.paths import DATA_CPVPD, DATA_SOLAR
+from src.lib.paths import DATA_CPVPD, DATA_FETCH, DATA_SOLAR
 import warnings
 warnings.filterwarnings('ignore')
 
 class SolarDataFetcher:
     """太阳辐射数据批量获取器"""
     
-    def __init__(self, data_dir, output_dir='solar_data_output'):
+    def __init__(self, data_dir, output_dir=None):
         """
         初始化
-        
+
         Parameters:
         -----------
         data_dir : str
             CPVPD-2024数据集目录
         output_dir : str
-            输出目录
+            输出目录，默认 backend/data/fetch（断点续传产物）
         """
         self.data_dir = Path(data_dir)
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True)
+        self.output_dir = Path(output_dir) if output_dir else DATA_FETCH
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # 文件路径
         self.progress_file = self.output_dir / 'fetch_progress.pkl'
