@@ -3,10 +3,13 @@
 使用NASA POWER API获取全球太阳辐射数据
 """
 
+import logging
 import time
 
 import numpy as np
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class SolarRadiationAPI:
@@ -110,7 +113,7 @@ class SolarRadiationAPI:
             )
 
             if not ghi_values or not temp_values or not precip_values:
-                print(f"API返回无效气候序列 ({lat}, {lon})")
+                logger.warning("API返回无效气候序列 (%s, %s)", lat, lon)
                 return None
 
             # 计算年份数
@@ -124,12 +127,12 @@ class SolarRadiationAPI:
                 'precip_annual_mean': float(np.sum(precip_values) / num_years),  # mm/year
             }
             if not all(np.isfinite(v) for v in result.values()):
-                print(f"API统计结果含 NaN/Inf ({lat}, {lon})")
+                logger.warning("API统计结果含 NaN/Inf (%s, %s)", lat, lon)
                 return None
             return result
 
         except Exception as e:
-            print(f"API请求失败 ({lat}, {lon}): {e}")
+            logger.warning("API请求失败 (%s, %s): %s", lat, lon, e)
             return None
 
     def batch_get_solar_data(self, coordinates, delay=0.5):

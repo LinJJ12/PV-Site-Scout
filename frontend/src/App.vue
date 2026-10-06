@@ -135,7 +135,9 @@
               <tr><th>序号</th><th>省份</th><th>面积 km2</th><th>GHI</th><th>降水 mm</th><th>PVPI</th></tr>
             </thead>
             <tbody>
-              <tr v-for="(row, index) in topSites" :key="row.index">
+              <!-- 该表固定展示全国 MCDM TOP10：资源收益页没有地图，
+                   若沿用 topSites 会被态势页/实时页的省份选择静默过滤成空表 -->
+              <tr v-for="(row, index) in topSitesAll" :key="row.index">
                 <td>{{ index + 1 }}</td><td>{{ row.provinceName }}</td><td>{{ row.area_km2 }}</td><td>{{ row.ghi_mean }}</td><td>{{ row.precip_annual }}</td><td>{{ row.PVPI }}</td>
               </tr>
             </tbody>
@@ -211,7 +213,7 @@
             <div class="loading-spinner"></div>
             <p>正在从 NASA POWER 获取点击位置气候数据...</p>
             <p>{{ loadingModelText }}</p>
-            <p class="loading-hint">首次请求可能需要 30-90 秒，请耐心等待</p>
+            <p class="loading-hint">{{ useFullModel ? "首次请求可能需要 30-90 秒，请耐心等待" : "NASA 不可用或超时（30 秒）时自动回退本地真实站点数据" }}</p>
           </div>
 
           <div class="error-content" v-else-if="errorMessage">
@@ -1088,6 +1090,12 @@ const rerunFromHistory = (rec) => {
 const renderRealtimeGauge = (result) => {
   const el = realtimeGaugeRef.value;
   if (!el) return;
+  // 结果区随 realtimeResult 销毁重建，旧 echarts 实例会挂在已卸载的 DOM 上，
+  // 导致第二次预测起仪表盘空白；检测到 DOM 变化时必须重新 init
+  if (gaugeChart && gaugeChart.getDom() !== el) {
+    gaugeChart.dispose();
+    gaugeChart = null;
+  }
   if (!gaugeChart) gaugeChart = echarts.init(el, "bigscreen");
   const levelColor = result.level_color || "#00d4fe";
   gaugeChart.setOption({
@@ -1314,7 +1322,13 @@ watch(activeTab, async (newTab) => {
 onMounted(async () => {
   tick();
   clockTimer = window.setInterval(tick, 1000);
-  await loadChinaMap();
+  try {
+    await loadChinaMap();
+  } catch (error) {
+    // 地图边界全部加载失败时不能卡住启动流程：继续加载数据，
+    // 地图区域会因 chinaGeoJson 为空而不渲染，dataLoadError 展示错误提示
+    console.error("中国地图边界加载失败", error);
+  }
   try {
     await loadData();
   } catch (error) {
@@ -1328,7 +1342,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.clearInterval(clockTimer);
   window.removeEventListener("resize", handleResize);
-  visibleCharts.value.forEach((chart) => chart.dispose());
+  chartRefs().forEach((chart) => chart.dispose());
+  charts.length = 0;
   if (gaugeChart) {
     gaugeChart.dispose();
     gaugeChart = null;

@@ -32,7 +32,15 @@ const median = (values) => {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 };
 
-const stationText = await readFile(stationCsv, "utf8");
+let stationText;
+try {
+  stationText = await readFile(stationCsv, "utf8");
+} catch {
+  // 全新克隆默认不含 backend/data/（已 gitignore）。跳过同步而不是让 dev/build 失败，
+  // 前端仍可启动；需要完整站点表时按 README 准备数据后再运行本脚本。
+  console.warn(`[sync:data] 未找到 ${path.relative(projectRoot, stationCsv)}，已跳过站点数据同步（不影响启动）`);
+  process.exit(0);
+}
 const stations = parseCsv(stationText);
 const byProvince = new Map();
 

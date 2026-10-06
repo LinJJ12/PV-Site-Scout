@@ -114,6 +114,16 @@ pip install -r requirements.txt
 python main.py
 ```
 
+也可使用 conda（本项目开发环境为 Python 3.11 的 `cpvp` 环境，含 torch；仅 GBDT 推理无需 torch）：
+
+```bash
+conda create -n pv python=3.11 -y
+conda activate pv
+cd backend
+pip install -r requirements.txt
+python main.py
+```
+
 #### 运行时环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -130,6 +140,8 @@ cd backend
 uv run python scripts/smoke_api.py
 ```
 
+覆盖项：模型加载（GBDT 运行包优先）、参数校验、气候数据有效性、NASA 网格缓存、限流 429、离线回退、调试端点门控与信息泄露检查。全部通过时输出 `ALL CHECKS PASSED`。
+
 ### 3. 启动前端
 
 ```bash
@@ -139,7 +151,9 @@ npm run sync:data   # 从 backend/data/solar 同步站点统计（若本地有�
 npm run dev
 ```
 
-开发服务默认：`http://127.0.0.1:5173`（已将 `/api` 代理到后端 `5000` 端口）。
+开发服务默认：`http://127.0.0.1:5173`（已将 `/api` 代理到后端 `5000` 端口；端口被占用时 Vite 会自动换下一个，注意以终端实际输出为准）。
+
+`npm run dev` / `npm run build` 前会自动执行 `sync:data`：本地缺少 `backend/data/solar/pv_stations_mcdm_scored.csv` 时仅跳过同步并提示，不会中断启动（全新克隆可直接跑通演示，页面会提示数据未加载）。
 
 生产构建：
 
@@ -169,6 +183,7 @@ npm run preview
 - 默认优先加载 **GBDT 运行包**（`model_gbdt_runtime.pkl`）：推理耗时毫秒级，且完全不导入 torch，启动更快
 - 仅当运行包缺失时才回退加载 GAT 完整包，并按需惰性导入 torch（`uv sync --group torch`）
 - 实时预测依赖 NASA POWER；NASA 不可用时，**简化公式**自动回退到最近真实站点气候数据，保证离线可用；完整模式会明确报错（HTTP 503），避免静默给出错误高分
+- 后端完全不可达时，前端会用内置站点数据本地估算兜底，并在结果中标注「本地真实数据兜底」与回退原因
 - NASA POWER 数据为 0.5° 网格且历史数据不变，后端按网格单元缓存响应（默认 24h），相邻点击命中同一网格时即时返回，同时避免因重复请求被 NASA 限制
 
 ### 安全与稳定性
@@ -183,7 +198,17 @@ npm run preview
 
 1. 顶部标签切换「选址态势 / 资源收益 / 实时选址」等模块  
 2. 地图：滚轮缩放、拖拽平移；左键省份下钻，右键返回全国  
-3. 实时选址：点击地图取点，等待后端返回 PVPI、等级与气象摘要  
+3. 实时选址：点击地图取点，等待后端返回 PVPI、等级与气象摘要；右侧可随时切换简化公式 / GBDT 模型，结果面板会标注数据来源与推理版本
+
+## API 概览
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/predict?lat=&lon=&mode=simple\|full` | GET | 实时选址预测。`simple`=简化公式（NASA 不可用时回退最近真实站点），`full`=GBDT/GAT 模型（NASA 不可用时返回 503）；受每 IP 限流 |
+| `/api/status` | GET | 模型加载状态、类型、特征列、等级映射 |
+| `/api/toggle_mode` | POST | 切换简化/完整模型（`{"mode": "simple"\|"full"}`） |
+| `/api/health` | GET | 存活探针 |
+| `/api/debug_model` | GET | 调试端点，默认 404，需 `PV_ENABLE_DEBUG_ENDPOINTS=1` |
 
 ## 开发说明
 
@@ -219,6 +244,18 @@ waitress-serve --host=0.0.0.0 --port=5000 main:app  # 需在 main.py 中导出 a
 - **发电量建模**：引入 [pvlib-python](https://github.com/pvlib/pvlib-python) 做 PV 系统建模（温度修正、逆变器效率、逐时仿真），把 PVPI 从资源评分升级为发电量/LCOE 估计
 - **选址方法论**：GIS + MCDM（AHP/熵权法/TOPSIS）是主流范式，可参考 Tahri et al. 2015、Cunden et al. 2020 等论文补充坡度坡向、土地利用、保护区、电网可达性等约束层
 - **GNN 推理**：GAT 路径已支持惰性加载；进一步可做归纳式（inductive）推理子图缓存，避免每次请求重建全图
+
+## 常见问题（Troubleshooting）
+
+| 现象 | 原因与处理 |
+|------|------------|
+| 前端显示「真实数据加载失败」 | `frontend/public/data/` 缺少站点表或省级统计。按「准备本地数据与模型」准备好 `backend/data/solar/pv_stations_mcdm_scored.csv` 后重跑 `npm run sync:data`，或从后端数据目录手动复制 |
+| 实时选址提示 NASA 不可用 | 简化模式会自动回退到最近真实站点数据（结果标注数据来源）；完整模式明确报 503。检查网络后点击「重试」即可 |
+| 后端启动后只有简化公式 | `backend/models/` 缺少模型包。放入 `model_gbdt_runtime.pkl`（推荐）或 `model_gat_gbdt_pvssi.pkl`，重启后端；仅有完整包且需要 GAT 时执行 `uv sync --group torch` |
+| 返回 429「请求过于频繁」 | 触发每 IP 限流（默认 60 次/分钟）。等待窗口重置，或用 `PV_RATE_LIMIT_PER_MIN` 调整/关闭 |
+| 5000 端口被占用 | `python main.py --port 5001`，并将 `frontend/vite.config.js` 中代理目标同步改为新端口 |
+| 完整模式 PVPI 恒为 1.00 或提示推理版本过旧 | 后端为旧版本进程，重启 backend 后刷新页面 |
+| 首次预测很慢 | NASA POWER 首次请求需在线拉取，同 0.5° 网格后续点击会命中缓存即时返回 |
 
 ## 免责声明
 

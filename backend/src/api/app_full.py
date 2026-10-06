@@ -9,6 +9,7 @@ import os
 import pickle
 
 import numpy as np
+import pandas as pd
 from flask import Flask, jsonify, request
 from scipy.spatial import cKDTree
 
@@ -180,9 +181,17 @@ def _iter_gbdt_models(gbdt_models):
             yield item
 
 
+def _predict_gbdt(model, X_sc):
+    """按模型训练时的列名补齐输入，避免每次请求刷 sklearn feature-name 警告。"""
+    names = getattr(model, "feature_names_in_", None)
+    if names is not None:
+        return model.predict(pd.DataFrame(X_sc, columns=list(names)))
+    return model.predict(X_sc)
+
+
 def transform_with_fitted_gbdt(X, scaler, gbdt_models):
     X_sc = scaler.transform(X)
-    preds = [model.predict(X_sc).reshape(-1, 1) for model in _iter_gbdt_models(gbdt_models)]
+    preds = [_predict_gbdt(model, X_sc).reshape(-1, 1) for model in _iter_gbdt_models(gbdt_models)]
     return np.column_stack([X_sc] + preds).astype(np.float32)
 
 
@@ -311,7 +320,9 @@ def _full_prediction(lat, lon):
     x_scaler = model_package["x_scaler"]
     y_scaler = model_package["y_scaler"]
 
-    gbdt_scaled_preds = [float(m.predict(x_scaler.transform(X_cand))[0]) for m in _iter_gbdt_models(gbdt_models)]
+    gbdt_scaled_preds = [
+        float(_predict_gbdt(m, x_scaler.transform(X_cand))[0]) for m in _iter_gbdt_models(gbdt_models)
+    ]
     gbdt_pred_mean = float(np.mean(gbdt_scaled_preds))
 
     pvssi_model = gbdt_pred_mean
