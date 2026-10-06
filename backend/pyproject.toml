@@ -1,5 +1,5 @@
 [project]
-name = "pv-site-prediction-backend"
+name = "pv-site-scout-backend"
 version = "1.0.0"
 description = "光伏选址预测 API（Flask）"
 requires-python = ">=3.10"

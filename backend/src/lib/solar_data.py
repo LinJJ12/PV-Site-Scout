@@ -36,7 +36,7 @@ class SolarRadiationAPI:
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": "pv-site-prediction-dashboard/1.0 (educational; +https://github.com/LinJJ12/pv-site-prediction-dashboard)",
+                "User-Agent": "PV-Site-Scout/1.0 (educational; +https://github.com/LinJJ12/PV-Site-Scout)",
                 "Accept": "application/json",
             }
         )
