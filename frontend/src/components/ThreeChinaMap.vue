@@ -16,7 +16,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { geoCentroid, geoContains, geoMercator } from "d3-geo";
+import { geoCentroid, geoMercator } from "d3-geo";
 import gsap from "gsap";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -58,9 +58,6 @@ let clock;
 let pointerDown = null;
 let didDrag = false;
 let cityGeoCache = new Map();
-let cityStatsByProvince = new Map();
-let focusedProvinceAdcode = null;
-let cityBoundaryFailed = false;
 let pillarMaterial = null;
 let flightMovers = [];
 
@@ -189,13 +186,6 @@ const clearSceneObjects = () => {
   pillarMaterial = null;
   flightMovers = [];
   hoverInfo.value = { visible: false, province: "", count: 0 };
-};
-
-const getActiveCityCount = (feature) => {
-  if (!focusedProvinceAdcode) return 0;
-  const cityStats = cityStatsByProvince.get(focusedProvinceAdcode);
-  const cityName = normalizeFeatureName(feature);
-  return Number(cityStats?.get(cityName) || 0);
 };
 
 /* choropleth 色带：省均 PVPI 低 → 高（与设计方案 §3.1 地图色带一致） */
@@ -468,33 +458,10 @@ const loadCityFeatures = async (provinceFeature) => {
     const features = Array.isArray(geoJson?.features) ? geoJson.features : null;
     cityGeoCache.set(adcode, features);
     return features;
-  } catch (error) {
+  } catch {
     cityGeoCache.set(adcode, null);
     return null;
   }
-};
-
-const computeCityStats = (adcode, cityFeatures, provinceName) => {
-  if (cityStatsByProvince.has(adcode)) return cityStatsByProvince.get(adcode);
-  const cityStats = new Map();
-  const provinceStations = stationsByProvinceName.value.get(provinceName) || [];
-
-  for (const feature of cityFeatures) {
-    cityStats.set(normalizeFeatureName(feature), 0);
-  }
-
-  for (const station of provinceStations) {
-    const lon = Number(station.lon);
-    const lat = Number(station.lat);
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-    const city = cityFeatures.find((feature) => geoContains(feature, [lon, lat]));
-    if (!city) continue;
-    const cityName = normalizeFeatureName(city);
-    cityStats.set(cityName, (cityStats.get(cityName) || 0) + 1);
-  }
-
-  cityStatsByProvince.set(adcode, cityStats);
-  return cityStats;
 };
 
 const addFallbackStationPillars = () => {
@@ -687,11 +654,8 @@ const enterProvince = async (mesh) => {
   const province = mesh.userData.province;
   const count = mesh.userData.count;
   const provinceFeature = mesh.userData.feature;
-  const adcode = provinceFeature?.properties?.adcode || null;
   focusedProvince.value = province;
-  focusedProvinceAdcode = adcode;
   drilldownFeatures.value = null;
-  cityBoundaryFailed = false;
   emit("province-focus", { province, count });
   buildMap(true);
   const cityFeatures = await loadCityFeatures(provinceFeature);
@@ -703,9 +667,7 @@ const enterProvince = async (mesh) => {
 
 const resetView = () => {
   focusedProvince.value = "";
-  focusedProvinceAdcode = null;
   drilldownFeatures.value = null;
-  cityBoundaryFailed = false;
   emit("province-focus", { province: "", count: 0 });
   buildMap(true);
 };
@@ -844,7 +806,6 @@ const handleResize = () => {
 watch(
   () => [props.geoJson, props.stats, props.stations, props.mode, props.provincePvpi],
   async () => {
-    cityStatsByProvince.clear();
     await nextTick();
     if (scene && props.geoJson) buildMap(false);
   },

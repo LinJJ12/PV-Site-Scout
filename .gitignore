@@ -127,6 +127,7 @@ backend/models/
 *.json
 !frontend/package.json
 !frontend/package-lock.json
+!frontend/jsconfig.json
 !frontend/public/data/
 !frontend/public/data/**
 

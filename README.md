@@ -9,23 +9,24 @@
 - 视频：[全国光伏电站智能选址可视化系统（Bilibili）](https://www.bilibili.com/video/BV1jojG66Eio/?share_source=copy_web&vd_source=f486789e701626cf145934c007761661)
 
 <p align="center">
-  <img width="48%" alt="演示截图1" src="https://github.com/user-attachments/assets/4f0ef94b-d5fe-4f29-878f-21e9295dc0b4" />
-  <img width="48%" alt="演示截图2" src="https://github.com/user-attachments/assets/a85c079e-bb38-4deb-846e-f569516cad83" />
+  <img width="90%" alt="选址态势" src="docs/screenshots/dashboard.png" />
 </p>
 <p align="center">
-  <img width="48%" alt="演示截图3" src="https://github.com/user-attachments/assets/02a177ea-4497-44e2-a54f-55a6a5dd7f83" />
-  <img width="48%" alt="演示截图4" src="https://github.com/user-attachments/assets/602655c0-cad0-4ea1-a19a-2265072fa528" />
+  <img width="48%" alt="资源收益评估" src="docs/screenshots/resource-profit.png" />
+  <img width="48%" alt="实时选址" src="docs/screenshots/realtime.png" />
 </p>
 
 ## 功能概览
 
-| 模块 | 说明 |
-|------|------|
-| 选址态势 | Three.js 三维中国地图，展示电站分布与省级下钻 |
-| 资源收益评估 | 多维图表分析资源潜力与收益相关指标 |
-| 实时选址 | 点击地图坐标，调用后端模型输出 PVPI 等结果 |
+| 模块 | 路由 | 说明 |
+|------|------|------|
+| 选址态势 | `/#/dashboard` | Three.js 三维中国地图，展示电站分布与省级下钻 |
+| 资源收益评估 | `/#/resource` | 多维图表分析资源潜力与收益相关指标 |
+| 实时选址 | `/#/realtime` | 点击地图坐标，调用后端模型输出 PVPI 等结果 |
 
-技术要点：Vue 3 + Vite 前端大屏、Flask API、GBDT（可选 GAT）推理、NASA POWER 气候数据、ECharts 图表。
+三个视图基于 Vue Router 独立成页（hash 模式，各有一址、刷新/深链接直达不 404），组件懒加载 + 按页分包。
+
+技术要点：Vue 3 + Vue Router + Vite 前端大屏、Flask API、GBDT（可选 GAT）推理、NASA POWER 气候数据、ECharts 图表、ESLint 代码规范。
 
 ## 仓库结构
 
@@ -35,29 +36,41 @@
 .
 ├── LICENSE
 ├── README.md
-├── frontend/                 # Vue 3 + Vite 可视化大屏
+├── docs/
+│   └── screenshots/            # README 演示截图
+├── frontend/                   # Vue 3 + Vue Router + Vite 可视化大屏
 │   ├── src/
-│   ├── public/data/          # 前端演示用轻量静态数据
+│   │   ├── api/                # 后端 API 客户端
+│   │   ├── components/         # 地图、面板等通用组件
+│   │   ├── composables/        # useFitScreen / useCharts
+│   │   ├── router/             # 路由（三视图独立网址）
+│   │   ├── stores/             # 共享状态（数据/实时预测，单例 composable）
+│   │   ├── utils/              # 格式化、省份映射、PVPI 分级
+│   │   ├── views/              # 三个页面级视图（懒加载）
+│   │   ├── App.vue             # 大屏外壳（头部导航 + 路由出口）
+│   │   └── main.js
+│   ├── public/data/            # 前端演示用轻量静态数据
 │   ├── scripts/sync-data.mjs
+│   ├── eslint.config.js
 │   └── package.json
-└── backend/                  # Flask API 与离线脚本
-    ├── main.py               # 统一启动入口
-    ├── pyproject.toml        # 推荐用 uv 管理依赖
+└── backend/                    # Flask API 与离线脚本
+    ├── main.py                 # 统一启动入口
+    ├── pyproject.toml          # 推荐用 uv 管理依赖
     ├── requirements.txt
     ├── src/
-    │   ├── api/              # HTTP 接口
-    │   └── lib/              # 工具库与路径常量
-    ├── scripts/              # 数据拉取、评分、冒烟测试等
-    ├── data/                 # 本地数据（默认不入库，体积大）
-    ├── models/               # 模型权重（默认不入库）
-    └── resource/             # 运行日志等（默认不入库）
+    │   ├── api/                # HTTP 接口
+    │   └── lib/                # 工具库与路径常量
+    ├── scripts/                # 数据拉取、评分、冒烟测试等
+    ├── data/                   # 本地数据（默认不入库，体积大）
+    ├── models/                 # 模型权重（默认不入库）
+    └── resource/               # 运行日志等（默认不入库）
 ```
 
 > 地理原始数据、处理后的全量站点表、模型 `.pkl` 等大文件已写入 `.gitignore`，需自行准备到 `backend/data/`、`backend/models/`。
 
 ## 技术栈
 
-**前端**：Vue 3、Vite、Three.js、ECharts、D3（地理相关处理）
+**前端**：Vue 3、Vue Router 4、Vite、Three.js、ECharts、D3（地理相关处理）、ESLint（flat config）
 
 **后端**：Python 3.10+、Flask、NumPy / Pandas / SciPy / scikit-learn、LightGBM / XGBoost；可选 PyTorch + PyTorch Geometric（GAT）
 
@@ -149,6 +162,7 @@ cd frontend
 npm install
 npm run sync:data   # 从 backend/data/solar 同步站点统计（若本地有数据）
 npm run dev
+npm run lint        # ESLint 检查（lint:fix 自动修复）
 ```
 
 开发服务默认：`http://127.0.0.1:5173`（已将 `/api` 代理到后端 `5000` 端口；端口被占用时 Vite 会自动换下一个，注意以终端实际输出为准）。
@@ -196,7 +210,7 @@ npm run preview
 
 ## 使用提示
 
-1. 顶部标签切换「选址态势 / 资源收益 / 实时选址」等模块  
+1. 顶部标签切换「选址态势 / 资源收益 / 实时选址」，或直接访问对应网址（`/#/dashboard`、`/#/resource`、`/#/realtime`）  
 2. 地图：滚轮缩放、拖拽平移；左键省份下钻，右键返回全国  
 3. 实时选址：点击地图取点，等待后端返回 PVPI、等级与气象摘要；右侧可随时切换简化公式 / GBDT 模型，结果面板会标注数据来源与推理版本
 
@@ -218,7 +232,11 @@ npm run preview
 | `backend/src/api/app_full.py` | 完整预测服务 |
 | `backend/src/lib/paths.py` | 数据/模型路径常量 |
 | `backend/scripts/calc_mcdm_pvpi.py` | PVPI 评分脚本示例 |
-| `frontend/src/App.vue` | 大屏主界面 |
+| `frontend/src/App.vue` | 大屏外壳（头部导航 + 路由出口） |
+| `frontend/src/router/index.js` | 路由定义（hash 模式，懒加载） |
+| `frontend/src/stores/solarData.js` | 站点统计数据加载与派生指标 |
+| `frontend/src/stores/realtime.js` | 实时预测请求/模型切换/历史记录 |
+| `frontend/src/views/*.vue` | 三个页面级视图 |
 | `frontend/src/components/ThreeChinaMap.vue` | 三维地图组件 |
 
 欢迎通过 Issue / PR 讨论学习问题；请勿提交大体积数据、密钥或个人隐私信息。
@@ -234,7 +252,7 @@ waitress-serve --host=0.0.0.0 --port=5000 main:app  # 需在 main.py 中导出 a
 # python -c "from src.api.app_full import app; from waitress import serve; serve(app, host='0.0.0.0', port=5000)"
 ```
 
-前端生产构建后由任意静态服务器托管 `frontend/dist/`，并将 `/api` 反向代理到后端 5000 端口（Nginx/Caddy 均可）。
+前端生产构建后由任意静态服务器托管 `frontend/dist/`，并将 `/api` 反向代理到后端 5000 端口（Nginx/Caddy 均可）。前端路由为 hash 模式，静态托管无需配置 history fallback。
 
 ## 参考与优化方向
 
