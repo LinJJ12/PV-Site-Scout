@@ -53,14 +53,13 @@
 │   ├── scripts/sync-data.mjs
 │   ├── eslint.config.js
 │   └── package.json
-└── backend/                    # Flask API 与离线脚本
+└── backend/                    # Flask API 服务
     ├── main.py                 # 统一启动入口
     ├── pyproject.toml          # 推荐用 uv 管理依赖
     ├── requirements.txt
     ├── src/
     │   ├── api/                # HTTP 接口
     │   └── lib/                # 工具库与路径常量
-    ├── scripts/                # 数据拉取、评分、冒烟测试等
     ├── data/                   # 本地数据（默认不入库，体积大）
     ├── models/                 # 模型权重（默认不入库）
     └── resource/               # 运行日志等（默认不入库）
@@ -98,7 +97,7 @@
 
 ```bash
 cd backend
-python scripts/export_gbdt_runtime.py
+python training/scripts/export_gbdt_runtime.py
 ```
 
 ### 2. 启动后端
@@ -150,7 +149,7 @@ python main.py
 
 ```bash
 cd backend
-uv run python scripts/smoke_api.py
+uv run python training/scripts/smoke_api.py
 ```
 
 覆盖项：模型加载（GBDT 运行包优先）、参数校验、气候数据有效性、NASA 网格缓存、限流 429、离线回退、调试端点门控与信息泄露检查。全部通过时输出 `ALL CHECKS PASSED`。
@@ -231,7 +230,7 @@ npm run preview
 | `backend/main.py` | 后端统一入口 |
 | `backend/src/api/app_full.py` | 完整预测服务 |
 | `backend/src/lib/paths.py` | 数据/模型路径常量 |
-| `backend/scripts/calc_mcdm_pvpi.py` | PVPI 评分脚本示例 |
+| `backend/training/scripts/calc_mcdm_pvpi.py` | PVPI 评分脚本（本地研究工具，不入库） |
 | `frontend/src/App.vue` | 大屏外壳（头部导航 + 路由出口） |
 | `frontend/src/router/index.js` | 路由定义（hash 模式，懒加载） |
 | `frontend/src/stores/solarData.js` | 站点统计数据加载与派生指标 |
